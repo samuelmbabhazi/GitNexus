@@ -51,7 +51,7 @@
  */
 
 import type Parser from 'tree-sitter';
-import type { ParsedImport } from 'gitnexus-shared';
+import type { ParsedImport, Range } from 'gitnexus-shared';
 import type { ExtractedDecoratorRoute } from '../workers/parse-worker.js';
 import { plainString, propertyName } from './data-route-table.js';
 import type {
@@ -511,7 +511,8 @@ function classFacts(
   for (const [name, node] of candidates) {
     if (node === null) continue;
     const routes: ExtractedDecoratorRoute[] = [];
-    collectClassRoutes(node, '', filePath, lineOffset, routes, NOTHING_REDECLARED);
+    const handlerRanges = new Map<ExtractedDecoratorRoute, Range>();
+    collectClassRoutes(node, '', filePath, lineOffset, routes, NOTHING_REDECLARED, handlerRanges);
     const base = baseRef(node, byName, parsedImports);
     if (routes.length === 0 && base === undefined) continue;
 
@@ -525,19 +526,20 @@ function classFacts(
           : ((exportedAs ??= exportedClassNames(root)).get(name) ?? []),
       ...(base === undefined ? {} : { base }),
       names: readable ? [...names] : null,
-      routes: routes.flatMap((route) =>
-        route.handlerName === undefined
+      routes: routes.flatMap((route) => {
+        const handlerRange = handlerRanges.get(route);
+        return route.handlerName === undefined || handlerRange === undefined
           ? []
           : [
               {
                 handlerName: route.handlerName,
-                handlerLine: route.lineNumber,
+                handlerRange,
                 httpMethod: route.httpMethod,
                 decoratorName: route.decoratorName,
                 routePath: route.routePath,
               },
-            ],
-      ),
+            ];
+      }),
     });
   }
   return out;
@@ -865,6 +867,20 @@ function isRedeclared(member: Parser.SyntaxNode, redeclared?: ReadonlySet<string
   return name === null || redeclared.has(name);
 }
 
+/**
+ * The range of a method as the symbol table and the graph record it: the whole
+ * `method_definition`, which starts below the decorators in TypeScript and at
+ * the first one in JavaScript. Lines are 1-based and columns 0-based.
+ */
+function methodRange(member: Parser.SyntaxNode, lineOffset: number): Range {
+  return {
+    startLine: member.startPosition.row + 1 + lineOffset,
+    startCol: member.startPosition.column,
+    endLine: member.endPosition.row + 1 + lineOffset,
+    endCol: member.endPosition.column,
+  };
+}
+
 function collectClassRoutes(
   classNode: Parser.SyntaxNode,
   prefix: string,
@@ -873,6 +889,8 @@ function collectClassRoutes(
   out: ExtractedDecoratorRoute[],
   /** Handler names a subclass already declares; set only for a base class. */
   redeclared?: ReadonlySet<string>,
+  /** Filled with the range of each route's handler, for the caller that asks. */
+  handlerRanges?: Map<ExtractedDecoratorRoute, Range>,
 ): void {
   const body = classNode.childForFieldName('body');
   if (!body) return;
@@ -939,7 +957,7 @@ function collectClassRoutes(
       // same line — so the loop is the whole of the multi-path support. An
       // empty array falls out as zero iterations without a special case.
       for (const routePath of routePaths) {
-        out.push({
+        const route: ExtractedDecoratorRoute = {
           filePath,
           // A pathless `@Get()` is the controller's index route and carries no
           // segment of its own. Emit '/' rather than '': `claim()` in
@@ -953,7 +971,9 @@ function collectClassRoutes(
           lineNumber: member.startPosition.row + 1 + lineOffset,
           prefix: prefix === '' ? null : prefix,
           ...(handlerName === undefined ? {} : { handlerName }),
-        });
+        };
+        out.push(route);
+        handlerRanges?.set(route, methodRange(member, lineOffset));
       }
     }
 

@@ -16,7 +16,9 @@
  * `nest.ts` is modelled on it.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { GraphNode, GraphRelationship } from 'gitnexus-shared';
 import { runPipelineFromRepo } from '../../src/core/ingestion/pipeline.js';
@@ -42,6 +44,26 @@ interface RouteView {
   readonly handler: string;
   readonly handlerLabel: string;
   readonly handlerFile: string;
+}
+
+/** `Class.method` for each method with a `HANDLES_ROUTE` edge to the route at `url`. */
+function handlingMethods(result: PipelineResult, url: string): string[] {
+  const relationships: GraphRelationship[] = [];
+  result.graph.forEachRelationship((rel) => void relationships.push(rel));
+  let routeId: string | undefined;
+  result.graph.forEachNode((node) => {
+    if (node.label === 'Route' && node.properties.name === url) routeId = node.id;
+  });
+  return relationships
+    .filter((rel) => rel.type === 'HANDLES_ROUTE' && rel.targetId === routeId)
+    .map((rel) => result.graph.getNode(rel.sourceId))
+    .filter((source) => source?.label === 'Method')
+    .map((method) => {
+      const owners = relationships
+        .filter((rel) => rel.type === 'HAS_METHOD' && rel.targetId === method?.id)
+        .map((rel) => String(result.graph.getNode(rel.sourceId)?.properties.name));
+      return `${owners.join('|')}.${String(method?.properties.name)}`;
+    });
 }
 
 describe('NestJS decorator route ingestion pipeline', () => {
@@ -267,24 +289,10 @@ describe('NestJS decorator route ingestion pipeline', () => {
     // classes of `crud.controller.ts`, `pending` on a class of `export.base.js`
     // that no controller extends. The name finds two methods; the edge has to
     // start at the one the controller's base class declares.
-    const handledBy = (url: string): string[] => {
-      const route = routeNodes().find((node) => node.properties.name === url);
-      return relationships()
-        .filter((rel) => rel.type === 'HANDLES_ROUTE' && rel.targetId === route?.id)
-        .map((rel) => result.graph.getNode(rel.sourceId))
-        .filter((source) => source?.label === 'Method')
-        .map((method) => {
-          const owners = relationships()
-            .filter((rel) => rel.type === 'HAS_METHOD' && rel.targetId === method?.id)
-            .map((rel) => String(result.graph.getNode(rel.sourceId)?.properties.name));
-          return `${owners.join('|')}.${String(method?.properties.name)}`;
-        });
-    };
-
     expect({
-      members: handledBy('/members'),
-      tags: handledBy('/tags'),
-      exports: handledBy('/exports/pending'),
+      members: handlingMethods(result, '/members'),
+      tags: handlingMethods(result, '/tags'),
+      exports: handlingMethods(result, '/exports/pending'),
     }).toEqual({
       members: ['CrudController.findEvery'],
       tags: ['ReadOnlyController.findEvery'],
@@ -392,6 +400,81 @@ describe('NestJS decorator route ingestion pipeline', () => {
       expect(routes().filter((route) => route.handlerFile.endsWith('venues.service.ts'))).toEqual(
         [],
       );
+    });
+  });
+});
+
+describe('NestJS routes inherited from a base file written on one line', () => {
+  // Valid TypeScript that a formatter would spread over several lines, so the
+  // sources are written here and not kept as fixture files. On one line a
+  // method is told from its neighbours by its column only.
+  const SOURCES: Record<string, string> = {
+    // Two classes on the line, both with a `ping`.
+    'src/shared/pair.ts': [
+      "import { Get, Res } from '@nestjs/common';",
+      "export class PairBase { @Get('ping') ping(@Res() res: any) { res.json({ pairKey: 1 }); } } export class PairOther { ping(@Res() res: any) { res.json({ otherKey: 2 }); } }",
+      '',
+    ].join('\n'),
+    'src/pair.controller.ts': [
+      "import { Controller } from '@nestjs/common';",
+      "import { PairBase } from './shared/pair';",
+      '',
+      "@Controller('pair')",
+      'export class PairController extends PairBase {}',
+      '',
+    ].join('\n'),
+    // One class, two handlers on the line.
+    'src/shared/two.ts': [
+      "import { Get, Res } from '@nestjs/common';",
+      "export class TwoBase { @Get('first') first(@Res() res: any) { res.json({ firstKey: 1 }); } @Get('second') second(@Res() res: any) { res.json({ secondKey: 2 }); } }",
+      '',
+    ].join('\n'),
+    'src/two.controller.ts': [
+      "import { Controller } from '@nestjs/common';",
+      "import { TwoBase } from './shared/two';",
+      '',
+      "@Controller('two')",
+      'export class TwoController extends TwoBase {}',
+      '',
+    ].join('\n'),
+  };
+  let repo: string;
+  let result: PipelineResult;
+
+  beforeAll(async () => {
+    repo = await fs.mkdtemp(path.join(os.tmpdir(), 'gitnexus-nest-one-line-'));
+    for (const [file, source] of Object.entries(SOURCES)) {
+      await fs.mkdir(path.join(repo, path.dirname(file)), { recursive: true });
+      await fs.writeFile(path.join(repo, file), source);
+    }
+    result = await runPipelineFromRepo(repo, () => {}, {});
+  }, 120_000);
+
+  afterAll(async () => {
+    await fs.rm(repo, { recursive: true, force: true });
+  });
+
+  const route = (url: string) => {
+    let responseKeys: unknown = 'no route';
+    result.graph.forEachNode((node) => {
+      if (node.label === 'Route' && node.properties.name === url) {
+        responseKeys = node.properties.responseKeys;
+      }
+    });
+    return { handledBy: handlingMethods(result, url), responseKeys };
+  };
+
+  it('hands the route to the base method when another class on the line shares its name', () => {
+    expect(route('/pair/ping')).toEqual({
+      handledBy: ['PairBase.ping'],
+      responseKeys: ['pairKey'],
+    });
+  });
+
+  it('gives two inherited handlers on one line one payload each', () => {
+    expect({ first: route('/two/first'), second: route('/two/second') }).toEqual({
+      first: { handledBy: ['TwoBase.first'], responseKeys: ['firstKey'] },
+      second: { handledBy: ['TwoBase.second'], responseKeys: ['secondKey'] },
     });
   });
 });

@@ -200,91 +200,102 @@ describe('routes phase — definition-level HANDLES_ROUTE', () => {
 describe('routes phase — response shape of a route inherited from another file', () => {
   const BASE = 'src/shared/crud.controller.ts';
   const TAGS = 'src/tags/tags.controller.ts';
-  const files = {
-    // `summary` is lines 1 to 4, counted from 0. `export` is a second handler
-    // of the same class, so the file as a whole holds the keys of both.
-    [BASE]: [
-      'export abstract class ReadOnlyController {',
-      "  @Get('summary')",
-      '  summary(@Res() res) {',
-      '    res.json({ items: [], total: 0 });',
-      '  }',
-      '',
-      "  @Get('export')",
-      '  export(@Res() res) {',
-      "    res.json({ url: '' });",
-      '  }',
-      '}',
-      '',
-    ].join('\n'),
-    [TAGS]: [
-      "@Controller('tags')",
-      'export class TagsController extends ReadOnlyController {',
-      "  @Get('popular')",
-      '  popular(@Res() res) {',
-      '    res.json({ tags: [], days: 7 });',
-      '  }',
-      '}',
-      '',
-    ].join('\n'),
+  const SUMMARY = ['summary(@Res() res) {', '    res.json({ items: [], total: 0 });', '  }'].join(
+    '\n',
+  );
+  const FIRST = 'first(@Res() res) { res.json({ firstKey: 1 }); }';
+  const SECOND = 'second(@Res() res) { res.json({ secondKey: 2 }); }';
+  const BASE_SOURCE = [
+    'export abstract class ReadOnlyController {',
+    "  @Get('summary')",
+    `  ${SUMMARY}`,
+    '',
+    // Two handlers on one line: the line holds the payloads of both.
+    `  @Get('first') ${FIRST} @Get('second') ${SECOND}`,
+    '}',
+    '',
+  ].join('\n');
+  const TAGS_SOURCE = [
+    "@Controller('tags')",
+    'export class TagsController extends ReadOnlyController {',
+    "  @Get('popular')",
+    '  popular(@Res() res) {',
+    '    res.json({ tags: [], days: 7 });',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+  const files = { [BASE]: BASE_SOURCE, [TAGS]: TAGS_SOURCE };
+
+  /** The range `snippet` covers in the base file: lines from 1, columns from 0. */
+  const rangeOf = (snippet: string) => {
+    const before = BASE_SOURCE.slice(0, BASE_SOURCE.indexOf(snippet)).split('\n');
+    const inside = snippet.split('\n');
+    const startCol = before[before.length - 1].length;
+    return {
+      startLine: before.length,
+      startCol,
+      endLine: before.length + inside.length - 1,
+      endCol: (inside.length === 1 ? startCol : 0) + inside[inside.length - 1].length,
+    };
   };
-  const SUMMARY_ID = `Method:${BASE}:ReadOnlyController.summary`;
-  const SUMMARY_KEY = routeNodeKey('GET', '/tags/summary');
-  const SUMMARY_ROUTE_ID = generateId('Route', SUMMARY_KEY);
   // What `resolveNestInheritedRoutes` emits: the route is the controller's,
   // the handler is a method of the base file.
-  const inheritedRoute = {
+  const inherited = (handlerName: string, snippet: string) => ({
     filePath: TAGS,
-    routePath: 'summary',
+    routePath: handlerName,
     httpMethod: 'GET',
     decoratorName: 'Get',
     lineNumber: 2,
     prefix: 'tags',
-    handlerName: 'summary',
+    handlerName,
     handlerFilePath: BASE,
-    handlerLine: 3,
-  };
+    handlerRange: rangeOf(snippet),
+  });
+  const routeId = (handlerName: string): string =>
+    generateId('Route', routeNodeKey('GET', `/tags/${handlerName}`));
 
-  it('reads the keys in the lines of the base method and keeps the route in the controller file', async () => {
+  it('reads the keys within the range of the base method and keeps the route in the controller file', async () => {
+    const summaryId = `Method:${BASE}:ReadOnlyController.summary`;
     const { graph } = await runRoutesPhase({
       files,
-      handlerNode: { id: SUMMARY_ID, label: 'Method', filePath: BASE, lines: [2, 4] },
-      routeHandlerSymbols: new Map([[SUMMARY_KEY, SUMMARY_ID]]),
-      decoratorRoutes: [inheritedRoute],
+      handlerNode: { id: summaryId, label: 'Method', filePath: BASE, lines: [2, 4] },
+      routeHandlerSymbols: new Map([[routeNodeKey('GET', '/tags/summary'), summaryId]]),
+      decoratorRoutes: [inherited('summary', SUMMARY)],
     });
 
-    const route = graph.getNode(SUMMARY_ROUTE_ID);
+    const route = graph.getNode(routeId('summary'));
     expect(route?.properties.responseKeys).toEqual(['items', 'total']);
     expect(route?.properties.filePath).toBe(TAGS);
-    expect(handlesRouteSources(graph, SUMMARY_ROUTE_ID).sort()).toEqual(
-      [generateId('File', TAGS), SUMMARY_ID].sort(),
+    expect(handlesRouteSources(graph, routeId('summary')).sort()).toEqual(
+      [generateId('File', TAGS), summaryId].sort(),
     );
   });
 
-  it.each([
-    { label: 'is not resolved', handlerNode: undefined, symbols: new Map<string, string>() },
-    {
-      // A symbol of the controller's file: its lines mean nothing in the base file.
-      label: 'resolves outside the base file',
-      handlerNode: {
-        id: `Method:${TAGS}:TagsController.popular`,
-        label: 'Method' as const,
-        filePath: TAGS,
-        lines: [3, 5] as const,
-      },
-      symbols: new Map([[SUMMARY_KEY, `Method:${TAGS}:TagsController.popular`]]),
-    },
-  ])('records no response shape when the base method $label', async ({ handlerNode, symbols }) => {
-    // The controller's file answers its own routes with other keys. Borrowed
-    // for the inherited route, they would describe a handler that is not its.
+  it('gives each of two handlers on one line the keys of its own body', async () => {
+    // No symbol is resolved here: the range alone says where each body is.
     const { graph } = await runRoutesPhase({
       files,
-      ...(handlerNode ? { handlerNode } : {}),
-      routeHandlerSymbols: symbols,
-      decoratorRoutes: [inheritedRoute],
+      routeHandlerSymbols: new Map(),
+      decoratorRoutes: [inherited('first', FIRST), inherited('second', SECOND)],
     });
 
-    const route = graph.getNode(SUMMARY_ROUTE_ID);
+    expect({
+      first: graph.getNode(routeId('first'))?.properties.responseKeys,
+      second: graph.getNode(routeId('second'))?.properties.responseKeys,
+    }).toEqual({ first: ['firstKey'], second: ['secondKey'] });
+  });
+
+  it('records no response shape when the file of the base method cannot be read', async () => {
+    // The controller's file answers its own route with other keys. Borrowed
+    // for the inherited route, they would describe a handler that is not its.
+    const { graph } = await runRoutesPhase({
+      files: { [TAGS]: TAGS_SOURCE },
+      routeHandlerSymbols: new Map(),
+      decoratorRoutes: [inherited('summary', SUMMARY)],
+    });
+
+    const route = graph.getNode(routeId('summary'));
     expect(route?.properties.filePath).toBe(TAGS);
     expect(route?.properties).not.toHaveProperty('responseKeys');
   });

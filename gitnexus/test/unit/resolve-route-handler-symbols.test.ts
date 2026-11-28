@@ -112,16 +112,23 @@ describe('resolveRouteHandlerSymbols — decorator routes', () => {
 
   describe('a name `handlerFilePath` declares twice', () => {
     const BASE = 'src/crud.controller.ts';
-    // 0-based, as graph nodes store the line a definition starts on.
-    const START_LINES: Record<string, number> = {
-      'method:CrudController.list': 4,
-      'method:OtherBase.list': 11,
+    type Starts = Record<string, readonly [line: number, column: number]>;
+    // Where the graph says each method starts, both counted from 0.
+    const TWO_CLASSES: Starts = {
+      'method:CrudController.list': [4, 2],
+      'method:OtherBase.list': [11, 2],
     };
-    const context = (startLines = START_LINES) => ({
+    // The same two classes in a file written on one line.
+    const ONE_LINE: Starts = {
+      'method:CrudController.list': [2, 31],
+      'method:OtherBase.list': [2, 78],
+    };
+    const context = (starts: Starts) => ({
       files: [],
       resolveImportTarget: () => null,
       isExportedSymbol: () => false,
-      nodeStartLine: (nodeId: string) => startLines[nodeId],
+      nodeStartLine: (nodeId: string) => starts[nodeId]?.[0],
+      nodeStartColumn: (nodeId: string) => starts[nodeId]?.[1],
     });
     const modelWithBothClasses = () => {
       const model = createSemanticModel();
@@ -129,61 +136,93 @@ describe('resolveRouteHandlerSymbols — decorator routes', () => {
       model.symbols.add(BASE, 'list', 'method:OtherBase.list', 'Method');
       return model;
     };
-    const inheritedRoute = (handlerLine: number) =>
-      decoratorRoute({ handlerFilePath: BASE, handlerLine });
+    // A declaration range counts lines from 1 and columns from 0.
+    const startingAt = (startLine: number, startCol: number) =>
+      decoratorRoute({
+        handlerFilePath: BASE,
+        handlerRange: { startLine, startCol, endLine: startLine, endCol: startCol + 20 },
+      });
 
     it.each([
-      { label: 'the first class', handlerLine: 5, expected: 'method:CrudController.list' },
-      { label: 'the second class', handlerLine: 12, expected: 'method:OtherBase.list' },
-    ])('stamps the method of $label when the route names its line', ({ handlerLine, expected }) => {
+      { label: 'the first class', at: [5, 2], starts: TWO_CLASSES, expected: 'CrudController' },
+      { label: 'the second class', at: [12, 2], starts: TWO_CLASSES, expected: 'OtherBase' },
+      {
+        label: 'the first method of a line',
+        at: [3, 31],
+        starts: ONE_LINE,
+        expected: 'CrudController',
+      },
+      {
+        label: 'the second method of a line',
+        at: [3, 78],
+        starts: ONE_LINE,
+        expected: 'OtherBase',
+      },
+    ])('stamps $label when the route names its range', ({ at, starts, expected }) => {
       const out = resolveRouteHandlerSymbols(
         modelWithBothClasses(),
         [],
-        [inheritedRoute(handlerLine)],
-        context(),
+        [startingAt(at[0], at[1])],
+        context(starts),
       );
 
-      expect(out.get(GET_ORDERS)).toBe(expected);
+      expect(out.get(GET_ORDERS)).toBe(`method:${expected}.list`);
     });
 
     it.each([
-      { label: 'a line before both methods', handlerLine: 1 },
-      { label: 'a line between the two methods', handlerLine: 8 },
-      { label: 'the 0-based line of a method', handlerLine: 4 },
-    ])('stamps nothing for $label', ({ handlerLine }) => {
+      { label: 'a line before both methods', at: [1, 2] },
+      { label: 'a line between the two methods', at: [8, 2] },
+      { label: 'the 0-based line of a method', at: [4, 2] },
+      { label: 'another column of a method line', at: [5, 9] },
+    ])('stamps nothing for $label', ({ at }) => {
       // The nearest definition is a different declaration, not a close match.
       const out = resolveRouteHandlerSymbols(
         modelWithBothClasses(),
         [],
-        [inheritedRoute(handlerLine)],
-        context(),
+        [startingAt(at[0], at[1])],
+        context(TWO_CLASSES),
       );
 
       expect(out.has(GET_ORDERS)).toBe(false);
     });
 
-    it('stamps nothing when both methods start on the named line', () => {
+    it('stamps nothing when both methods start at the named position', () => {
       const out = resolveRouteHandlerSymbols(
         modelWithBothClasses(),
         [],
-        [inheritedRoute(5)],
-        context({ 'method:CrudController.list': 4, 'method:OtherBase.list': 4 }),
+        [startingAt(5, 2)],
+        context({ 'method:CrudController.list': [4, 2], 'method:OtherBase.list': [4, 2] }),
       );
 
       expect(out.has(GET_ORDERS)).toBe(false);
     });
 
-    it('stamps nothing when no start line can be read', () => {
-      const out = resolveRouteHandlerSymbols(modelWithBothClasses(), [], [inheritedRoute(5)]);
+    it.each([
+      { label: 'no position', readers: undefined },
+      {
+        label: 'no column',
+        readers: { ...context(TWO_CLASSES), nodeStartColumn: undefined },
+      },
+      {
+        label: 'no line',
+        readers: { ...context(TWO_CLASSES), nodeStartLine: undefined },
+      },
+    ])('stamps nothing when $label can be read', ({ readers }) => {
+      const out = resolveRouteHandlerSymbols(
+        modelWithBothClasses(),
+        [],
+        [startingAt(5, 2)],
+        readers,
+      );
 
       expect(out.has(GET_ORDERS)).toBe(false);
     });
 
-    it('keeps a name the file declares once, whatever line the route names', () => {
+    it('keeps a name the file declares once, whatever range the route names', () => {
       const model = createSemanticModel();
       model.symbols.add(BASE, 'list', 'method:CrudController.list', 'Method');
 
-      const out = resolveRouteHandlerSymbols(model, [], [inheritedRoute(40)], context());
+      const out = resolveRouteHandlerSymbols(model, [], [startingAt(40, 0)], context(TWO_CLASSES));
 
       expect(out.get(GET_ORDERS)).toBe('method:CrudController.list');
     });

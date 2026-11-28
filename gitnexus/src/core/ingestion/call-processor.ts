@@ -18,7 +18,7 @@
 import { KnowledgeGraph } from '../graph/types.js';
 import type { SemanticModel, SymbolTableReader } from './model/index.js';
 import { compareCodeUnits, generateId } from '../../lib/utils.js';
-import type { ParsedImport, SymbolDefinition } from 'gitnexus-shared';
+import type { ParsedImport, Range, SymbolDefinition } from 'gitnexus-shared';
 import { yieldToEventLoop } from './utils/event-loop.js';
 import type { ExtractedRoute, ExtractedFetchCall } from './workers/parse-worker.js';
 import type { ExtractedDecoratorRoute } from './workers/parse-worker.js';
@@ -64,9 +64,11 @@ interface RouteHandlerResolutionContext {
   readonly isExportedSymbol: (nodeId: string) => boolean;
   /**
    * 0-based graph-node startLine, to tell same-name handlers of one file
-   * apart: tRPC procedures, and a decorator route that names its `handlerLine`.
+   * apart: tRPC procedures, and a decorator route that names its `handlerRange`.
    */
   readonly nodeStartLine?: (nodeId: string) => number | undefined;
+  /** 0-based graph-node startColumn, for two same-name handlers on one line. */
+  readonly nodeStartColumn?: (nodeId: string) => number | undefined;
 }
 
 /** Same Function/Method gate as data-route resolution (`routeCallables`). */
@@ -398,8 +400,8 @@ export const processRoutesFromExtracted = async (
  * name, zero matches, or an ambiguous same-name match) carry no
  * `handlerSymbolId`; the extractor then falls back to source scan for that route
  * (fail-open, no regression, never a wrong handler). A decorator route that
- * names the line of its handler's declaration (`handlerLine`) settles a
- * same-name match with it: the definition starting on that line, or none.
+ * names the range of its handler's declaration (`handlerRange`) settles a
+ * same-name match with it: the definition starting at that position, or none.
  */
 export function resolveRouteHandlerSymbols(
   model: SemanticModel,
@@ -425,14 +427,21 @@ export function resolveRouteHandlerSymbols(
     return byId.size === 1 ? byId.values().next().value : undefined;
   };
 
-  // The one definition that starts on `line` (1-based; graph nodes store a
-  // 0-based `startLine`). No line reader, no definition on that line or two of
-  // them → undefined: the nearest definition is another declaration.
-  const definedOnLine = (defs: readonly SymbolDefinition[], line: number): string | undefined => {
+  // The one definition that starts where `range` does. Two methods of one
+  // name can share a line, never a position. Graph nodes store a 0-based
+  // `startLine`; a `Range` line is 1-based. No position reader, or no
+  // definition at that position → undefined: the nearest one is another
+  // declaration.
+  const declaredAt = (defs: readonly SymbolDefinition[], range: Range): string | undefined => {
     const startLine = routeContext?.nodeStartLine;
-    if (startLine === undefined) return undefined;
-    const target = toZeroBasedLine(line);
-    return uniqueById(defs.filter((def) => startLine(def.nodeId) === target))?.nodeId;
+    const startColumn = routeContext?.nodeStartColumn;
+    if (startLine === undefined || startColumn === undefined) return undefined;
+    const line = toZeroBasedLine(range.startLine);
+    return uniqueById(
+      defs.filter(
+        (def) => startLine(def.nodeId) === line && startColumn(def.nodeId) === range.startCol,
+      ),
+    )?.nodeId;
   };
 
   const routeCallables = (defs: readonly SymbolDefinition[]): readonly SymbolDefinition[] =>
@@ -612,7 +621,7 @@ export function resolveRouteHandlerSymbols(
     // where another class may declare a method of the same name.
     const defs = model.symbols.lookupExactAll(dr.handlerFilePath ?? dr.filePath, dr.handlerName);
     if (defs.length === 1) return defs[0]?.nodeId;
-    return dr.handlerLine === undefined ? undefined : definedOnLine(defs, dr.handlerLine);
+    return dr.handlerRange === undefined ? undefined : declaredAt(defs, dr.handlerRange);
   };
 
   // Decorator routes (Spring / FastAPI / generic) — the decorated handler in

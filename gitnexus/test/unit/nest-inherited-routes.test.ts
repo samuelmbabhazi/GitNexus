@@ -154,7 +154,8 @@ describe('NestJS routes inherited across files', () => {
     // the controller or its base class changes, so the route is its own. The
     // handler is the base method: `handlerFilePath` sends the name lookup to
     // the file that declares it, where the controller's file has no such name,
-    // and `handlerLine` is the line that method starts on.
+    // and `handlerRange` is what that method covers there, lines counted from 1
+    // and columns from 0.
     const routes = inherited({
       'crud.ts': CRUD,
       'x.controller.ts': controller("import { Crud } from './crud';", 'Crud<User>'),
@@ -170,7 +171,7 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'findAll',
         handlerFilePath: 'crud.ts',
-        handlerLine: 6,
+        handlerRange: { startLine: 6, startCol: 4, endLine: 6, endCol: 33 },
       },
       {
         filePath: 'x.controller.ts',
@@ -181,7 +182,7 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'create',
         handlerFilePath: 'crud.ts',
-        handlerLine: 12,
+        handlerRange: { startLine: 12, startCol: 4, endLine: 12, endCol: 15 },
       },
       {
         filePath: 'x.controller.ts',
@@ -192,35 +193,52 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'findOne',
         handlerFilePath: 'crud.ts',
-        handlerLine: 9,
+        handlerRange: { startLine: 9, startCol: 4, endLine: 9, endCol: 16 },
       },
     ]);
   });
 
-  it('names the line of the handler in the class the controller extends', () => {
-    // Both classes of the base file declare `ping`, so the file and the name
-    // fit two methods. The line is where the method starts, below its decorator.
-    const bases = `
-      import { Get } from '@nestjs/common';
+  it.each([
+    {
+      label: 'two classes of a file',
+      bases: `
+        import { Get } from '@nestjs/common';
 
-      export class Alpha {
-        @Get('ping')
-        ping() {}
-      }
+        export class Alpha {
+          @Get('ping')
+          ping() {}
+        }
 
-      export class Beta {
-        @Get('ping')
-        ping() {}
-      }
-    `;
+        export class Beta {
+          @Get('ping')
+          ping() {}
+        }
+      `,
+      alpha: 'bases.ts 6:10-6:19 ping',
+      beta: 'bases.ts 11:10-11:19 ping',
+    },
+    {
+      label: 'two classes on one line',
+      bases: `import { Get } from '@nestjs/common';
+export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') ping() {} }`,
+      alpha: 'bases.ts 2:34-2:43 ping',
+      beta: 'bases.ts 2:79-2:88 ping',
+    },
+  ])('names the range of the handler when $label declare it', ({ bases, alpha, beta }) => {
+    // The file and the name fit two methods. The range is the method's own:
+    // it starts below the decorator, and no two methods share one.
     const handlerOf = (base: string) =>
       inherited({
         'bases.ts': bases,
         'x.controller.ts': controller(`import { ${base} } from './bases';`, base),
-      }).map((route) => `${route.handlerFilePath}:${route.handlerLine} ${route.handlerName}`);
+      }).map(({ handlerFilePath, handlerRange: at, handlerName }) =>
+        at === undefined
+          ? 'no range'
+          : `${handlerFilePath} ${at.startLine}:${at.startCol}-${at.endLine}:${at.endCol} ${handlerName}`,
+      );
 
-    expect(handlerOf('Alpha')).toEqual(['bases.ts:6 ping']);
-    expect(handlerOf('Beta')).toEqual(['bases.ts:11 ping']);
+    expect(handlerOf('Alpha')).toEqual([alpha]);
+    expect(handlerOf('Beta')).toEqual([beta]);
   });
 
   it('names, for each level of a chain, the file of the class that declares the handler', () => {
@@ -855,7 +873,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'local',
-                handlerLine: 6,
+                handlerRange: { startLine: 6, startCol: 51, endLine: 6, endCol: 61 },
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'local',
@@ -870,7 +888,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'own',
-                handlerLine: 9,
+                handlerRange: { startLine: 9, startCol: 63, endLine: 9, endCol: 71 },
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'own',
@@ -911,7 +929,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'ping',
-                handlerLine: 4,
+                handlerRange: { startLine: 4, startCol: 61, endLine: 4, endCol: 70 },
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'ping',
@@ -961,6 +979,28 @@ describe('NestJS routes inherited across files', () => {
       expect(lineOf()).toEqual([4]);
       // An embedded script block starts further down its file.
       expect(lineOf(20)).toEqual([24]);
+    });
+
+    it('count the lines of a handler range from the top of the file', () => {
+      const source = [
+        "import { Get } from '@nestjs/common';",
+        'export class Base {',
+        "  @Get('ping')",
+        '  ping() {',
+        '    return 1;',
+        '  }',
+        '}',
+      ].join('\n');
+      const { tree, parsedImports } = parse('base.ts', source);
+
+      const rangesOf = (lineOffset?: number) =>
+        extractNestInheritanceFacts(tree, 'base.ts', parsedImports, lineOffset)?.classes.flatMap(
+          (cls) => cls.routes.map((route) => route.handlerRange),
+        );
+
+      expect(rangesOf()).toEqual([{ startLine: 4, startCol: 2, endLine: 6, endCol: 3 }]);
+      // Further down for an embedded script block; the columns do not move.
+      expect(rangesOf(20)).toEqual([{ startLine: 24, startCol: 2, endLine: 26, endCol: 3 }]);
     });
 
     it('record a barrel that declares no class', () => {

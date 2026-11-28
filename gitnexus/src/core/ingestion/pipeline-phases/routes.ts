@@ -11,6 +11,7 @@
  * @output  routeRegistry, handlerContents
  */
 
+import type { Range } from 'gitnexus-shared';
 import type { PipelinePhase, PipelineContext, PhaseResult } from './types.js';
 import { getPhaseOutput } from './types.js';
 import type { ParseOutput } from './parse.js';
@@ -73,9 +74,11 @@ export interface RouteEntry {
    * File that declares the route's handler, when it is not `filePath`: a
    * NestJS route inherited from a base class another file declares. The route,
    * its file edge and its middleware stay with `filePath`; the response shape
-   * is read from the handler's own source.
+   * is read from the handler's own source, over `handlerRange`.
    */
   handlerFilePath?: string;
+  /** Range of that handler's declaration in `handlerFilePath`. */
+  handlerRange?: Range;
 }
 
 export interface RoutesOutput {
@@ -159,6 +162,17 @@ function handlerSymbolContent(
     .split(/\r?\n/)
     .slice(startLine, endLine + 1)
     .join('\n');
+}
+
+/** The text a source range covers: 1-based lines, 0-based columns in UTF-16 units. */
+function rangeContent(content: string | undefined, range: Range): string | undefined {
+  if (content === undefined) return undefined;
+  const lines = content.split(/\r?\n/).slice(range.startLine - 1, range.endLine);
+  if (lines.length === 0) return undefined;
+  // The end first: on a single line both cuts apply to the same string.
+  lines[lines.length - 1] = lines[lines.length - 1].slice(0, range.endCol);
+  lines[0] = lines[0].slice(range.startCol);
+  return lines.join('\n');
 }
 
 const TEMPLATE_URL_PATTERNS: readonly RegExp[] = [
@@ -383,7 +397,9 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
         // says so (`ExtractedDecoratorRoute.source`).
         source: dr.source ?? `decorator-${dr.decoratorName}`,
         method,
-        ...(dr.handlerFilePath === undefined ? {} : { handlerFilePath: dr.handlerFilePath }),
+        ...(dr.handlerFilePath === undefined || dr.handlerRange === undefined
+          ? {}
+          : { handlerFilePath: dr.handlerFilePath, handlerRange: dr.handlerRange }),
       });
     }
 
@@ -431,20 +447,13 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
           (routeCountByPath.get(handlerPath) ?? 0) > 1
             ? (handlerSymbolContent(content, handlerSymbol.node) ?? analysisContent)
             : analysisContent;
-        // An inherited handler's body is in the file that declares it. The
-        // route's own file holds the responses of other handlers, or none, so
-        // without the method itself there is no shape to read.
-        const declaringContent =
-          entry.handlerFilePath === undefined
-            ? undefined
-            : handlerContents.get(entry.handlerFilePath);
+        // An inherited handler's body is in the file that declares it, over
+        // the range the extractor recorded. The route's own file holds the
+        // responses of other handlers, and so may a line of the base file.
         const shapeContent =
-          entry.handlerFilePath === undefined
+          entry.handlerFilePath === undefined || entry.handlerRange === undefined
             ? ownShapeContent
-            : declaringContent !== undefined &&
-                handlerSymbol?.node.properties.filePath === entry.handlerFilePath
-              ? handlerSymbolContent(declaringContent, handlerSymbol.node)
-              : undefined;
+            : rangeContent(handlerContents.get(entry.handlerFilePath), entry.handlerRange);
         const { responseKeys, errorKeys } = shapeContent
           ? handlerPath.endsWith('.php')
             ? extractPHPResponseShapes(shapeContent)

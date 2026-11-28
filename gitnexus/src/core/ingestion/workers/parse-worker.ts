@@ -111,7 +111,7 @@ import {
   runDefinitionPropertiesExtractor,
   shouldHarvestModuleConstants,
 } from '../language-provider.js';
-import type { ParsedFile } from 'gitnexus-shared';
+import type { ParsedFile, Range } from 'gitnexus-shared';
 import { setTreeParseContext } from '../file-parse-context.js';
 import { extractParsedFile, type ScopeCaptureSourceKind } from '../scope-extractor-bridge.js';
 import {
@@ -360,13 +360,13 @@ export interface ExtractedDecoratorRoute {
    */
   handlerFilePath?: string;
   /**
-   * Line the declaration of {@link handlerName} starts on, 1-based, in the
-   * file that declares it. Set when the extractor has singled that declaration
-   * out: a file may hold two classes with a method of that name, and the
-   * controller extends only one of them. Absent ⇒ the name resolves only when
-   * the file declares it once.
+   * Source range of the declaration of {@link handlerName}, in the file that
+   * declares it. Set when the extractor has singled that declaration out: a
+   * file may hold two methods of that name, on two classes or on one line,
+   * and the controller inherits only one of them. Absent ⇒ the name resolves
+   * only when the file declares it once.
    */
-  handlerLine?: number;
+  handlerRange?: Range;
   /**
    * Static hint for what the receiver of a qualified {@link handlerName}
    * (`h.Method`, `pkg.Func`) is, read from the registering file's own syntax.

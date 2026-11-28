@@ -1984,6 +1984,10 @@ export async function runChunkedParseAndResolve(
         const n = graph.getNode(id);
         return typeof n?.properties.startLine === 'number' ? n.properties.startLine : undefined;
       },
+      nodeStartColumn: (id) => {
+        const n = graph.getNode(id);
+        return typeof n?.properties.startColumn === 'number' ? n.properties.startColumn : undefined;
+      },
     },
     selectedRoutes,
   );
