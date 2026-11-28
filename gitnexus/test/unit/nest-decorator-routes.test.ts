@@ -1044,4 +1044,88 @@ describe('NestJS decorator routes', () => {
       `),
     ).toEqual(['GET /health/ping']);
   });
+
+  // ─── A controller written without a name ───────────────────────────
+  //
+  // `export default class { … }` is a class expression, the value of the
+  // export statement, where a named class is a declaration. NestJS 12.5.0
+  // serves each form below as listed.
+
+  it.each([
+    {
+      label: 'the decorator before `export`',
+      source: `
+        @Controller('x')
+        export default class {
+          @Get('own')
+          own() {}
+        }
+      `,
+    },
+    {
+      label: 'the decorator after `default`',
+      source: `
+        export default @Controller('x') class {
+          @Get('own')
+          own() {}
+        }
+      `,
+    },
+  ])('reads a controller without a name, with $label', ({ source }) => {
+    expect(urls(source)).toEqual(['GET /x/own']);
+    expect(jsUrls(source)).toEqual(['GET /x/own']);
+  });
+
+  it('gives a controller without a name the routes of a same-file base class', () => {
+    expect(
+      urls(`
+        class Base {
+          @Get('ping')
+          ping() {}
+
+          @Get('hidden')
+          hidden() {}
+        }
+
+        @Controller('x')
+        export default class extends Base {
+          @Get('own')
+          own() {}
+
+          hidden() {}
+        }
+      `),
+    ).toEqual(['GET /x/own', 'GET /x/ping']);
+  });
+
+  it('reads a controller without a name beside a named one', () => {
+    expect(
+      urls(`
+        @Controller('named')
+        export class NamedController {
+          @Get('a')
+          a() {}
+        }
+
+        @Controller('x')
+        export default class {
+          @Get('b')
+          b() {}
+        }
+      `),
+    ).toEqual(['GET /named/a', 'GET /x/b']);
+  });
+
+  it('reads no controller in a class expression that is not the default export', () => {
+    // NestJS would serve this one if a module listed it. Only the default
+    // export is followed: its file can say how other files reach it.
+    expect(
+      urls(`
+        export const Built = @Controller('x') class {
+          @Get('own')
+          own() {}
+        };
+      `),
+    ).toEqual([]);
+  });
 });

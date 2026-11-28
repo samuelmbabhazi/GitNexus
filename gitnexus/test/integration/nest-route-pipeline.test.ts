@@ -34,6 +34,7 @@ const HEALTH_FILE = 'src/health/health.controller.ts';
 const INVOICES_FILE = 'src/invoices/invoices.controller.ts';
 const MEMBERS_FILE = 'src/members/members.controller.ts';
 const TAGS_FILE = 'src/tags/tags.controller.ts';
+const SESSIONS_FILE = 'src/sessions/sessions.controller.ts';
 const CRUD_FILE = 'src/shared/crud.controller.ts';
 const EXPORT_BASE_FILE = 'src/shared/export.base.js';
 
@@ -138,6 +139,14 @@ describe('NestJS decorator route ingestion pipeline', () => {
     // mis-keyed route surfaces as a handler donated to the wrong URL rather
     // than as an absence.
     expect(routes()).toEqual([
+      // `SessionsController` is written without a name and redeclares nothing,
+      // so it inherits the `@Delete` that `MembersController` hides.
+      {
+        identity: 'DELETE /sessions/:id',
+        handler: 'destroy',
+        handlerLabel: 'Method',
+        handlerFile: CRUD_FILE,
+      },
       {
         identity: 'DELETE /venues/:id',
         handler: 'remove',
@@ -188,6 +197,24 @@ describe('NestJS decorator route ingestion pipeline', () => {
         handler: 'currentMember',
         handlerLabel: 'Method',
         handlerFile: MEMBERS_FILE,
+      },
+      {
+        identity: 'GET /sessions',
+        handler: 'findEvery',
+        handlerLabel: 'Method',
+        handlerFile: CRUD_FILE,
+      },
+      {
+        identity: 'GET /sessions/:id',
+        handler: 'findById',
+        handlerLabel: 'Method',
+        handlerFile: CRUD_FILE,
+      },
+      {
+        identity: 'GET /sessions/current',
+        handler: 'current',
+        handlerLabel: 'Method',
+        handlerFile: SESSIONS_FILE,
       },
       // Inherited from `ReadOnlyController`, the second class of that file.
       {
@@ -298,6 +325,52 @@ describe('NestJS decorator route ingestion pipeline', () => {
       tags: ['ReadOnlyController.findEvery'],
       exports: ['ExportBase.pending'],
     });
+  });
+
+  it('gives a controller written without a name its inherited routes and their handler edges', () => {
+    // `@Controller('sessions') export default class extends CrudController`:
+    // a class expression. The routes belong to its file, and each inherited
+    // one has an edge from the `CrudController` method that answers.
+    const sessions = routeNodes()
+      .filter((node) => String(node.properties.name).startsWith('/sessions'))
+      .map((node) => ({
+        route: `${String(node.properties.method)} ${String(node.properties.name)}`,
+        file: String(node.properties.filePath).replaceAll('\\', '/'),
+        handledBy: relationships()
+          .filter((rel) => rel.type === 'HANDLES_ROUTE' && rel.targetId === node.id)
+          .map((rel) => {
+            const source = result.graph.getNode(rel.sourceId);
+            const file = String(source?.properties.filePath).replaceAll('\\', '/');
+            return `${String(source?.label)} ${file} ${String(source?.properties.name)}`;
+          })
+          .sort(),
+      }))
+      .sort((a, b) => a.route.localeCompare(b.route));
+
+    const sessionsFile = `File ${SESSIONS_FILE} sessions.controller.ts`;
+    expect(sessions).toEqual([
+      {
+        route: 'DELETE /sessions/:id',
+        file: SESSIONS_FILE,
+        handledBy: [sessionsFile, `Method ${CRUD_FILE} destroy`],
+      },
+      {
+        route: 'GET /sessions',
+        file: SESSIONS_FILE,
+        handledBy: [sessionsFile, `Method ${CRUD_FILE} findEvery`],
+      },
+      {
+        route: 'GET /sessions/:id',
+        file: SESSIONS_FILE,
+        handledBy: [sessionsFile, `Method ${CRUD_FILE} findById`],
+      },
+      {
+        route: 'GET /sessions/current',
+        file: SESSIONS_FILE,
+        handledBy: [sessionsFile, `Method ${SESSIONS_FILE} current`],
+      },
+    ]);
+    expect(handlingMethods(result, '/sessions')).toEqual(['CrudController.findEvery']);
   });
 
   it('reads the response shape of an inherited route from the base method', () => {

@@ -830,6 +830,48 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
     ).toEqual(['GET /x/ping']);
   });
 
+  it.each([
+    {
+      label: 'a named class',
+      base: "export class Base { @Get('ping') ping() {} @Get('hidden') hidden() {} }",
+      imports: "import { Base } from './base';",
+    },
+    {
+      label: 'a class without a name either',
+      base: "export default class { @Get('ping') ping() {} @Get('hidden') hidden() {} }",
+      imports: "import Base from './base';",
+    },
+  ])('gives a controller without a name the routes of $label', ({ base, imports }) => {
+    // `@Controller('x') export default class extends Base { … }` is a class
+    // expression. NestJS serves its own route and the inherited one, and not
+    // the handler it redeclares without a decorator.
+    const withBase = (controller: string): Sources => ({
+      'base.ts': `import { Get } from '@nestjs/common';\n${base}`,
+      'x.controller.ts': `import { Controller, Get } from '@nestjs/common';\n${imports}\n${controller}`,
+    });
+    const body = "extends Base { @Get('own') own() {} hidden() {} }";
+
+    expect(allUrls(withBase(`@Controller('x')\nexport default class ${body}`))).toEqual([
+      'GET /x/own',
+      'GET /x/ping',
+    ]);
+    expect(allUrls(withBase(`export default @Controller('x') class ${body}`))).toEqual([
+      'GET /x/own',
+      'GET /x/ping',
+    ]);
+  });
+
+  it('reads a controller without a name under the JavaScript grammar', () => {
+    expect(
+      allUrls({
+        'base.js':
+          "import { Get } from '@nestjs/common';\nexport class Base { @Get('ping') ping() {} }",
+        'x.controller.js':
+          "import { Controller } from '@nestjs/common';\nimport { Base } from './base';\n@Controller('x')\nexport default class extends Base {}",
+      }),
+    ).toEqual(['GET /x/ping']);
+  });
+
   it('does not depend on the order the files are read in', () => {
     const sources: Sources = {
       'crud.ts': CRUD,
@@ -938,6 +980,48 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
           },
         ],
         controllers: [],
+        reexports: [],
+        starExports: [],
+      });
+    });
+
+    it('record a controller without a name, open at its imported base', () => {
+      expect(
+        factsOf(
+          'x.controller.ts',
+          `
+            import { Controller, Get } from '@nestjs/common';
+            import { Base } from './base';
+            @Controller('x')
+            export default class extends Base { @Get('own') own() {} }
+          `,
+        ),
+      ).toEqual({
+        classes: [
+          {
+            exportedAs: ['default'],
+            base: { source: './base', name: 'Base' },
+            names: ['own'],
+            routes: [
+              {
+                handlerName: 'own',
+                handlerRange: { startLine: 5, startCol: 60, endLine: 5, endCol: 68 },
+                httpMethod: 'GET',
+                decoratorName: 'Get',
+                routePath: 'own',
+              },
+            ],
+          },
+        ],
+        controllers: [
+          {
+            prefix: 'x',
+            lineNumber: 5,
+            redeclared: ['own'],
+            claimed: ['GET /x/own'],
+            base: { source: './base', name: 'Base' },
+          },
+        ],
         reexports: [],
         starExports: [],
       });

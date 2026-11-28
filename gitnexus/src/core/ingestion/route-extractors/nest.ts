@@ -402,7 +402,7 @@ export function extractNestRoutes(
   const classes = () => (classIndex ??= indexClassesByName(tree.rootNode));
 
   const visit = (node: Parser.SyntaxNode): void => {
-    if (CLASS_DECLARATION_TYPES.has(node.type)) {
+    if (CLASS_DECLARATION_TYPES.has(node.type) || isAnonymousDefaultClass(node)) {
       const prefix = controllerPrefix(node, filePath);
       // `undefined` — not a controller at all. `null` — a controller whose
       // prefix could not be read, so its routes' URLs are unknowable.
@@ -478,8 +478,8 @@ export function extractNestInheritanceFacts(
     if (byName.size > 0 || anonymous !== undefined) {
       classes = classFacts(root, byName, anonymous, filePath, parsedImports, lineOffset);
     }
-    if (byName.size > 0 && text.includes(CONTROLLER_HINT)) {
-      controllers = openControllers(root, byName, filePath, parsedImports, lineOffset);
+    if ((byName.size > 0 || anonymous !== undefined) && text.includes(CONTROLLER_HINT)) {
+      controllers = openControllers(root, byName, anonymous, filePath, parsedImports, lineOffset);
     }
   }
 
@@ -545,16 +545,22 @@ function classFacts(
   return out;
 }
 
-/** The controllers of a file whose chain of same-file base classes ends at an import. */
+/**
+ * The controllers of a file whose chain of same-file base classes ends at an
+ * import. `anonymous` is the class of `export default class { … }`, which can
+ * be a controller like any other.
+ */
 function openControllers(
   root: Parser.SyntaxNode,
   byName: ReadonlyMap<string, Parser.SyntaxNode | null>,
+  anonymous: Parser.SyntaxNode | undefined,
   filePath: string,
   parsedImports: readonly ParsedImport[],
   lineOffset: number,
 ): NestOpenController[] {
   const out: NestOpenController[] = [];
-  for (const node of root.descendantsOfType([...CLASS_DECLARATION_TYPES])) {
+  const declared = root.descendantsOfType([...CLASS_DECLARATION_TYPES]);
+  for (const node of anonymous === undefined ? declared : [...declared, anonymous]) {
     // Most controllers extend nothing; they are settled before any decorator is read.
     if (extendedClassName(node) === null) continue;
     const prefix = readController(node)?.prefix;
@@ -788,6 +794,15 @@ function anonymousDefaultClass(root: Parser.SyntaxNode): Parser.SyntaxNode | und
     if (value?.type === 'class') return value;
   }
   return undefined;
+}
+
+/** Whether `node` is that class: a class expression, the value of an export statement. */
+function isAnonymousDefaultClass(node: Parser.SyntaxNode): boolean {
+  return (
+    node.type === 'class' &&
+    node.parent?.type === 'export_statement' &&
+    node.parent.childForFieldName('value')?.startIndex === node.startIndex
+  );
 }
 
 /**

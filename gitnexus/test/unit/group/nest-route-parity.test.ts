@@ -160,6 +160,22 @@ export class VenuesController {
     expect(ingestionPairs(src)).toEqual(groupPairs(src));
   });
 
+  it('pins a controller written without a name', () => {
+    // `export default class` is a class expression: the old group query and
+    // the indexer both looked at class declarations only.
+    const src = `
+import { Controller, Get } from '@nestjs/common';
+
+@Controller('venues')
+export default class {
+  @Get('list')
+  list() {}
+}
+`;
+    expect(groupPairs(src)).toEqual(['GET /venues/list']);
+    expect(ingestionPairs(src)).toEqual(groupPairs(src));
+  });
+
   it('pins the argument-less @Controller() — routes mount at the root', () => {
     // Legal Nest, and the old group query's mandatory prefix argument made the
     // class invisible rather than rooting its methods at '/'.
