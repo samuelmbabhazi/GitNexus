@@ -741,9 +741,10 @@ describe('NestJS decorator routes', () => {
   // Where the extractor follows the chain, the expectation was checked against
   // a running NestJS 12.5.0 application: the listed URLs answer, the absent
   // ones return 404. Two kinds of case say nothing about NestJS. A base class
-  // the extractor cannot single out pins a refusal: that code runs, and NestJS
-  // serves the inherited route. A chain that loops cannot run at all: its case
-  // pins that the walk ends, with the routes it met before the chain closed.
+  // the extractor cannot single out pins a refusal: those snippets are only
+  // parsed, and do not establish what NestJS serves. A chain that loops cannot
+  // run at all: its case pins that the walk ends, with the routes it met
+  // before the chain closed.
 
   it('mounts the handlers of a same-file base class under the controller prefix', () => {
     const routes = extract(`
