@@ -139,7 +139,8 @@ describe('list --json and the registry file', () => {
         return (
           typeof value === 'object' &&
           value !== null &&
-          Object.values(value).every((count) => typeof count === 'number')
+          !Array.isArray(value) &&
+          Object.values(value).every((count) => Number.isFinite(count))
         );
       }
       if (field === 'branches') {
@@ -173,6 +174,30 @@ describe('list --json and the registry file', () => {
 
     expect(unexpected).toEqual([]);
     expect(process.exitCode).toBe(exitCodeBefore);
+  });
+
+  it('leaves out a counter the registry writes as a number JSON cannot hold', async () => {
+    // `1e400` parses to Infinity, and JSON prints Infinity back as null.
+    const repo = path.join(home, 'repo');
+    const slot = path.join(repo, '.gitnexus');
+    await fs.mkdir(slot, { recursive: true });
+    await fs.writeFile(path.join(slot, 'lbug'), '');
+    await fs.writeFile(
+      path.join(slot, 'gitnexus.json'),
+      JSON.stringify({ repoPath: repo, storagePath: slot }),
+    );
+    const row = JSON.stringify({ name: 'demo', path: repo, storagePath: slot });
+    await fs.writeFile(registry(), `[${row.slice(0, -1)},"stats":{"files":1e400,"nodes":5}}]`);
+
+    const { printed, exitCode } = await run();
+
+    expect(printed).toEqual([
+      {
+        schemaVersion: 1,
+        repositories: [{ name: 'demo', path: repo, storagePath: slot, stats: { nodes: 5 } }],
+      },
+    ]);
+    expect(exitCode).toBe(exitCodeBefore);
   });
 
   it('reports a registry path that is not a file', async () => {

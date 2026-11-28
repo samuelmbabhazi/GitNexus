@@ -366,7 +366,7 @@ describe('list --json (#1533)', () => {
         lastCommit: null,
         remoteUrl: 7,
         branch: {},
-        stats: { files: 4, nodes: '5', edges: 6 },
+        stats: { files: 4, nodes: '5', edges: 6, communities: Infinity, processes: NaN },
       },
       { name: 'duo', path: '/duo', storagePath: '/duo/.gitnexus', stats: 'none' },
     ] as unknown as Awaited<ReturnType<typeof listRegisteredRepos>>);

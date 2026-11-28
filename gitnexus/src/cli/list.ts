@@ -24,13 +24,14 @@ export interface ListOptions {
 const text = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
 
-/** The numeric counters of a `stats` object. */
+/**
+ * The numeric counters of a `stats` object. Finite ones only: `1e400` parses
+ * to `Infinity`, which JSON would print back as `null`.
+ */
 const counters = (value: unknown): Record<string, number> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
     ? Object.fromEntries(
-        Object.entries(value).filter(
-          (pair): pair is [string, number] => typeof pair[1] === 'number',
-        ),
+        Object.entries(value).filter((pair): pair is [string, number] => Number.isFinite(pair[1])),
       )
     : undefined;
 
