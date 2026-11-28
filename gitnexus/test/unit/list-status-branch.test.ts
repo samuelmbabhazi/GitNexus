@@ -330,6 +330,60 @@ describe('list --json (#1533)', () => {
     ]);
   });
 
+  it('drops a branch row whose name, date or commit is not a string', async () => {
+    vi.mocked(listRegisteredRepos).mockResolvedValue([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: '2026-06-11T08:00:00.000Z',
+        lastCommit: 'ccccccc3',
+        branches: [
+          { branch: 7, indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: 'ddddddd4' },
+          { branch: 'main', indexedAt: 42, lastCommit: 'aaaaaaa1' },
+          { branch: 'dev', indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: null },
+          { branch: 'feature/x', indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: 'bbbbbbb2' },
+        ],
+      } as unknown as Awaited<ReturnType<typeof listRegisteredRepos>>[number],
+    ]);
+
+    await listCommand({ json: true });
+
+    expect(JSON.parse(output()).repositories[0].branches).toEqual([
+      { branch: 'feature/x', indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: 'bbbbbbb2' },
+    ]);
+  });
+
+  it('prints a field only under the type the contract gives it', async () => {
+    // The registry reader checks `name`, `path` and `storagePath`; the rest
+    // reaches the command as the file has it.
+    vi.mocked(listRegisteredRepos).mockResolvedValue([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: 42,
+        lastCommit: null,
+        remoteUrl: 7,
+        branch: {},
+        stats: { files: 4, nodes: '5', edges: 6 },
+      },
+      { name: 'duo', path: '/duo', storagePath: '/duo/.gitnexus', stats: 'none' },
+    ] as unknown as Awaited<ReturnType<typeof listRegisteredRepos>>);
+
+    await listCommand({ json: true });
+
+    expect(JSON.parse(output()).repositories).toEqual([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        stats: { files: 4, edges: 6 },
+      },
+      { name: 'duo', path: '/duo', storagePath: '/duo/.gitnexus' },
+    ]);
+  });
+
   it('leaves the plain listing on the reader it had', async () => {
     vi.mocked(listRegisteredRepos).mockResolvedValue([]);
     const exitCode = process.exitCode;

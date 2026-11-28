@@ -16,19 +16,40 @@ export interface ListOptions {
 }
 
 /**
- * The branch rows of an entry, or nothing. The registry reader checks the
- * fields that identify a repository and leaves `branches` as the file has it,
- * so a value that is not a list, or a row in it that names no branch, is left
+ * A registry value under the type the JSON contract gives it, or nothing. The
+ * registry reader checks the fields that identify a repository and leaves the
+ * others as the file has them, so each one is checked here before it is
+ * printed for a script.
+ */
+const text = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : undefined;
+
+/** The numeric counters of a `stats` object. */
+const counters = (value: unknown): Record<string, number> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(
+        Object.entries(value).filter(
+          (pair): pair is [string, number] => typeof pair[1] === 'number',
+        ),
+      )
+    : undefined;
+
+/**
+ * The branch rows of an entry, or nothing. A row is kept when its three fields
+ * are strings; a value that is not a list, or a list with no such row, is left
  * out like an empty list.
  */
 const toJsonBranches = (branches: unknown) => {
   if (!Array.isArray(branches)) return undefined;
-  const rows = branches
-    .filter(
-      (row): row is NonNullable<RegistryEntry['branches']>[number] =>
-        typeof row === 'object' && row !== null && typeof row.branch === 'string',
-    )
-    .map(({ branch, indexedAt, lastCommit }) => ({ branch, indexedAt, lastCommit }));
+  const rows = branches.flatMap((row: unknown) => {
+    if (typeof row !== 'object' || row === null) return [];
+    const { branch, indexedAt, lastCommit } = row as Record<string, unknown>;
+    return typeof branch === 'string' &&
+      typeof indexedAt === 'string' &&
+      typeof lastCommit === 'string'
+      ? [{ branch, indexedAt, lastCommit }]
+      : [];
+  });
   return rows.length ? rows : undefined;
 };
 
@@ -42,11 +63,11 @@ const toJsonRow = (entry: RegistryEntry) => ({
   name: entry.name,
   path: entry.path,
   storagePath: entry.storagePath,
-  indexedAt: entry.indexedAt,
-  lastCommit: entry.lastCommit,
-  remoteUrl: entry.remoteUrl,
-  stats: entry.stats,
-  branch: entry.branch,
+  indexedAt: text(entry.indexedAt),
+  lastCommit: text(entry.lastCommit),
+  remoteUrl: text(entry.remoteUrl),
+  stats: counters(entry.stats),
+  branch: text(entry.branch),
   branches: toJsonBranches(entry.branches),
 });
 
