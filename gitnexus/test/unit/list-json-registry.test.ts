@@ -10,7 +10,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { listCommand } from '../../src/cli/list.js';
-import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
+import { listRegisteredRepos, readRegistryStrict } from '../../src/storage/repo-manager.js';
 
 describe('list --json and the registry file', () => {
   let home: string;
@@ -97,6 +97,82 @@ describe('list --json and the registry file', () => {
 
     expect(await listRegisteredRepos({ entries: [row] })).toEqual([row]);
     expect(await listRegisteredRepos()).toEqual([]);
+  });
+
+  it('reads a row whose remoteUrl is not a string instead of losing the registry', async () => {
+    // The credential strip ran on any truthy value and threw on this one: the
+    // strict read rejected the whole registry and the lenient one returned no row.
+    const row = { name: 'demo', path: '/demo', storagePath: '/demo/.gitnexus', remoteUrl: 42 };
+    await fs.writeFile(registry(), JSON.stringify([row]));
+
+    expect(await readRegistryStrict()).toEqual([row]);
+    expect(await listRegisteredRepos()).toEqual([row]);
+  });
+
+  it('lists a repository whatever its optional fields hold in the registry', async () => {
+    // A row that validation keeps: an owned storage folder with an index.
+    const repo = path.join(home, 'repo');
+    const slot = path.join(repo, '.gitnexus');
+    await fs.mkdir(slot, { recursive: true });
+    await fs.writeFile(path.join(slot, 'lbug'), '');
+    await fs.writeFile(
+      path.join(slot, 'gitnexus.json'),
+      JSON.stringify({ repoPath: repo, storagePath: slot }),
+    );
+    const row = {
+      name: 'demo',
+      path: repo,
+      storagePath: slot,
+      indexedAt: '2026-06-10T12:00:00.000Z',
+      lastCommit: 'aaaaaaa1',
+    };
+    const texts = ['indexedAt', 'lastCommit', 'remoteUrl', 'branch'];
+    const internal = ['shareOptOut', 'discovery', 'unknownField'];
+    const values = [42, 0, true, false, null, '', 'text', {}, { length: 1 }, [], ['x'], [null]];
+    const isText = (value: unknown) => typeof value === 'string';
+    /** Whether `field` is absent from the printed row, or has the type the contract gives it. */
+    const fits = (field: string, printed: Record<string, unknown>): boolean => {
+      if (!(field in printed)) return true;
+      const value = printed[field];
+      if (texts.includes(field)) return isText(value);
+      if (field === 'stats') {
+        return (
+          typeof value === 'object' &&
+          value !== null &&
+          Object.values(value).every((count) => typeof count === 'number')
+        );
+      }
+      if (field === 'branches') {
+        return (
+          Array.isArray(value) &&
+          value.every(
+            (branch: Record<string, unknown>) =>
+              isText(branch.branch) && isText(branch.indexedAt) && isText(branch.lastCommit),
+          )
+        );
+      }
+      return false;
+    };
+
+    // Every optional field takes every value in turn, through the real reader.
+    const unexpected: string[] = [];
+    for (const field of [...texts, 'stats', 'branches', ...internal]) {
+      for (const value of values) {
+        logSpy.mockClear();
+        await fs.writeFile(registry(), JSON.stringify([{ ...row, [field]: value }]));
+        await listCommand({ json: true });
+        const printed = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+          repositories?: Record<string, unknown>[];
+        };
+        const rows = printed.repositories ?? [];
+        if (rows.length !== 1 || rows[0].name !== 'demo' || !fits(field, rows[0])) {
+          unexpected.push(`${field} = ${JSON.stringify(value)}: ${JSON.stringify(printed)}`);
+        }
+      }
+    }
+
+    expect(unexpected).toEqual([]);
+    expect(process.exitCode).toBe(exitCodeBefore);
   });
 
   it('reports a registry path that is not a file', async () => {

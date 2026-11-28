@@ -659,7 +659,10 @@ const withRegistryLock = async <T>(operation: () => Promise<T>): Promise<T> => {
  */
 const sanitizeEntries = (entries: RegistryEntry[]): RegistryEntry[] =>
   entries.map((e) => {
-    if (!e.remoteUrl) return e;
+    // A value that is not a string has no credential to strip. Left as the
+    // file has it, the row stays readable: stripping it threw, which made the
+    // strict read reject the whole registry and the lenient one return no row.
+    if (typeof e.remoteUrl !== 'string' || !e.remoteUrl) return e;
     const cleaned = stripUrlCredentials(e.remoteUrl);
     return cleaned === e.remoteUrl ? e : { ...e, remoteUrl: cleaned };
   });
