@@ -110,6 +110,85 @@ describe('resolveRouteHandlerSymbols — decorator routes', () => {
     expect(out.has(GET_ORDERS)).toBe(false);
   });
 
+  describe('a name `handlerFilePath` declares twice', () => {
+    const BASE = 'src/crud.controller.ts';
+    // 0-based, as graph nodes store the line a definition starts on.
+    const START_LINES: Record<string, number> = {
+      'method:CrudController.list': 4,
+      'method:OtherBase.list': 11,
+    };
+    const context = (startLines = START_LINES) => ({
+      files: [],
+      resolveImportTarget: () => null,
+      isExportedSymbol: () => false,
+      nodeStartLine: (nodeId: string) => startLines[nodeId],
+    });
+    const modelWithBothClasses = () => {
+      const model = createSemanticModel();
+      model.symbols.add(BASE, 'list', 'method:CrudController.list', 'Method');
+      model.symbols.add(BASE, 'list', 'method:OtherBase.list', 'Method');
+      return model;
+    };
+    const inheritedRoute = (handlerLine: number) =>
+      decoratorRoute({ handlerFilePath: BASE, handlerLine });
+
+    it.each([
+      { label: 'the first class', handlerLine: 5, expected: 'method:CrudController.list' },
+      { label: 'the second class', handlerLine: 12, expected: 'method:OtherBase.list' },
+    ])('stamps the method of $label when the route names its line', ({ handlerLine, expected }) => {
+      const out = resolveRouteHandlerSymbols(
+        modelWithBothClasses(),
+        [],
+        [inheritedRoute(handlerLine)],
+        context(),
+      );
+
+      expect(out.get(GET_ORDERS)).toBe(expected);
+    });
+
+    it.each([
+      { label: 'a line before both methods', handlerLine: 1 },
+      { label: 'a line between the two methods', handlerLine: 8 },
+      { label: 'the 0-based line of a method', handlerLine: 4 },
+    ])('stamps nothing for $label', ({ handlerLine }) => {
+      // The nearest definition is a different declaration, not a close match.
+      const out = resolveRouteHandlerSymbols(
+        modelWithBothClasses(),
+        [],
+        [inheritedRoute(handlerLine)],
+        context(),
+      );
+
+      expect(out.has(GET_ORDERS)).toBe(false);
+    });
+
+    it('stamps nothing when both methods start on the named line', () => {
+      const out = resolveRouteHandlerSymbols(
+        modelWithBothClasses(),
+        [],
+        [inheritedRoute(5)],
+        context({ 'method:CrudController.list': 4, 'method:OtherBase.list': 4 }),
+      );
+
+      expect(out.has(GET_ORDERS)).toBe(false);
+    });
+
+    it('stamps nothing when no start line can be read', () => {
+      const out = resolveRouteHandlerSymbols(modelWithBothClasses(), [], [inheritedRoute(5)]);
+
+      expect(out.has(GET_ORDERS)).toBe(false);
+    });
+
+    it('keeps a name the file declares once, whatever line the route names', () => {
+      const model = createSemanticModel();
+      model.symbols.add(BASE, 'list', 'method:CrudController.list', 'Method');
+
+      const out = resolveRouteHandlerSymbols(model, [], [inheritedRoute(40)], context());
+
+      expect(out.get(GET_ORDERS)).toBe('method:CrudController.list');
+    });
+  });
+
   it('treats an empty routePath as a valid root route when resolving its handler', () => {
     const model = createSemanticModel();
     model.symbols.add(FILE, 'root', 'method:OrderController.root', 'Method');

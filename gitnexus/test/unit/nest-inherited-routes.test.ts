@@ -149,11 +149,12 @@ describe('NestJS routes inherited across files', () => {
     ]);
   });
 
-  it('keeps an inherited route in the controller file and names the file of its handler', () => {
+  it('keeps an inherited route in the controller file and says where its handler is declared', () => {
     // The controller's rows are the ones an incremental write replaces when
     // the controller or its base class changes, so the route is its own. The
     // handler is the base method: `handlerFilePath` sends the name lookup to
-    // the file that declares it, where the controller's file has no such name.
+    // the file that declares it, where the controller's file has no such name,
+    // and `handlerLine` is the line that method starts on.
     const routes = inherited({
       'crud.ts': CRUD,
       'x.controller.ts': controller("import { Crud } from './crud';", 'Crud<User>'),
@@ -169,6 +170,7 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'findAll',
         handlerFilePath: 'crud.ts',
+        handlerLine: 6,
       },
       {
         filePath: 'x.controller.ts',
@@ -179,6 +181,7 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'create',
         handlerFilePath: 'crud.ts',
+        handlerLine: 12,
       },
       {
         filePath: 'x.controller.ts',
@@ -189,8 +192,35 @@ describe('NestJS routes inherited across files', () => {
         prefix: 'x',
         handlerName: 'findOne',
         handlerFilePath: 'crud.ts',
+        handlerLine: 9,
       },
     ]);
+  });
+
+  it('names the line of the handler in the class the controller extends', () => {
+    // Both classes of the base file declare `ping`, so the file and the name
+    // fit two methods. The line is where the method starts, below its decorator.
+    const bases = `
+      import { Get } from '@nestjs/common';
+
+      export class Alpha {
+        @Get('ping')
+        ping() {}
+      }
+
+      export class Beta {
+        @Get('ping')
+        ping() {}
+      }
+    `;
+    const handlerOf = (base: string) =>
+      inherited({
+        'bases.ts': bases,
+        'x.controller.ts': controller(`import { ${base} } from './bases';`, base),
+      }).map((route) => `${route.handlerFilePath}:${route.handlerLine} ${route.handlerName}`);
+
+    expect(handlerOf('Alpha')).toEqual(['bases.ts:6 ping']);
+    expect(handlerOf('Beta')).toEqual(['bases.ts:11 ping']);
   });
 
   it('names, for each level of a chain, the file of the class that declares the handler', () => {
@@ -825,6 +855,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'local',
+                handlerLine: 6,
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'local',
@@ -839,6 +870,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'own',
+                handlerLine: 9,
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'own',
@@ -879,6 +911,7 @@ describe('NestJS routes inherited across files', () => {
             routes: [
               {
                 handlerName: 'ping',
+                handlerLine: 4,
                 httpMethod: 'GET',
                 decoratorName: 'Get',
                 routePath: 'ping',

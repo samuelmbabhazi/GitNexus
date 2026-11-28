@@ -62,7 +62,10 @@ interface RouteHandlerResolutionContext {
   /** User route configuration forwarded to provider handler hooks. */
   readonly routeHookConfig?: RouteHookConfig;
   readonly isExportedSymbol: (nodeId: string) => boolean;
-  /** 0-based graph-node startLine for same-name tRPC handler disambiguation. */
+  /**
+   * 0-based graph-node startLine, to tell same-name handlers of one file
+   * apart: tRPC procedures, and a decorator route that names its `handlerLine`.
+   */
   readonly nodeStartLine?: (nodeId: string) => number | undefined;
 }
 
@@ -394,7 +397,9 @@ export const processRoutesFromExtracted = async (
  * pre-#2289 behavior. Routes whose handler cannot be *uniquely* resolved (no
  * name, zero matches, or an ambiguous same-name match) carry no
  * `handlerSymbolId`; the extractor then falls back to source scan for that route
- * (fail-open, no regression, never a wrong handler).
+ * (fail-open, no regression, never a wrong handler). A decorator route that
+ * names the line of its handler's declaration (`handlerLine`) settles a
+ * same-name match with it: the definition starting on that line, or none.
  */
 export function resolveRouteHandlerSymbols(
   model: SemanticModel,
@@ -418,6 +423,16 @@ export function resolveRouteHandlerSymbols(
   const uniqueById = (defs: readonly SymbolDefinition[]): SymbolDefinition | undefined => {
     const byId = new Map(defs.map((def) => [def.nodeId, def]));
     return byId.size === 1 ? byId.values().next().value : undefined;
+  };
+
+  // The one definition that starts on `line` (1-based; graph nodes store a
+  // 0-based `startLine`). No line reader, no definition on that line or two of
+  // them → undefined: the nearest definition is another declaration.
+  const definedOnLine = (defs: readonly SymbolDefinition[], line: number): string | undefined => {
+    const startLine = routeContext?.nodeStartLine;
+    if (startLine === undefined) return undefined;
+    const target = toZeroBasedLine(line);
+    return uniqueById(defs.filter((def) => startLine(def.nodeId) === target))?.nodeId;
   };
 
   const routeCallables = (defs: readonly SymbolDefinition[]): readonly SymbolDefinition[] =>
@@ -592,10 +607,12 @@ export function resolveRouteHandlerSymbols(
     if (dr.source === DATA_ROUTE_TABLE_SOURCE) return dataHandlerByRoute.get(dr);
     const providerHandler = routeContext?.providerRouteHandler?.(dr.filePath);
     if (providerHandler) return providerHandler(dr, providerContext);
-    // An inherited handler is declared in another file than the route's own.
-    return dr.handlerName
-      ? uniqueSymbolId(dr.handlerFilePath ?? dr.filePath, dr.handlerName)
-      : undefined;
+    if (!dr.handlerName) return undefined;
+    // An inherited handler is declared in another file than the route's own,
+    // where another class may declare a method of the same name.
+    const defs = model.symbols.lookupExactAll(dr.handlerFilePath ?? dr.filePath, dr.handlerName);
+    if (defs.length === 1) return defs[0]?.nodeId;
+    return dr.handlerLine === undefined ? undefined : definedOnLine(defs, dr.handlerLine);
   };
 
   // Decorator routes (Spring / FastAPI / generic) — the decorated handler in

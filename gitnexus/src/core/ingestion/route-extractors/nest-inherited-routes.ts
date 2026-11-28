@@ -25,7 +25,8 @@
  * base class, so its rows are rewritten when either file changes. Rows hung on
  * the base file would outlive a controller that stops extending it. The handler
  * is still the base method: `handlerFilePath` tells the name lookup which file
- * declares it.
+ * declares it, and `handlerLine` which declaration of that file it is, since
+ * another class there may use the same method name.
  */
 
 import type { ExtractedDecoratorRoute } from '../workers/parse-worker.js';
@@ -39,6 +40,8 @@ export type NestBaseRef =
 /** A route a class declares on an instance method, before any controller prefix. */
 export interface NestInheritableRoute {
   readonly handlerName: string;
+  /** Line the handler's declaration starts on, 1-based. */
+  readonly handlerLine: number;
   readonly httpMethod: string;
   readonly decoratorName: string;
   readonly routePath: string;
@@ -189,6 +192,7 @@ export function resolveNestInheritedRoutes(
             prefix,
             handlerName: route.handlerName,
             handlerFilePath: base.filePath,
+            handlerLine: route.handlerLine,
             url,
           });
         }

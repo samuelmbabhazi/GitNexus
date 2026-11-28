@@ -1,4 +1,4 @@
-import { Delete, Get } from '@nestjs/common';
+import { Delete, Get, Res } from '@nestjs/common';
 
 /**
  * The CRUD handlers every resource controller shares. The class lives in a
@@ -18,4 +18,20 @@ export abstract class CrudController<T> {
 
   @Delete(':id')
   destroy(): void {}
+}
+
+/**
+ * A second base class of this file, with a `findEvery` of its own: the name
+ * alone does not say which class a controller inherits that handler from.
+ */
+export abstract class ReadOnlyController<T> {
+  @Get()
+  findEvery(): T[] {
+    return [];
+  }
+
+  @Get('summary')
+  summary(@Res() res: { json(body: unknown): void }): void {
+    res.json({ items: [], total: 0 });
+  }
 }

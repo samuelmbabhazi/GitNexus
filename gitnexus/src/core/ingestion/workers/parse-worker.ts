@@ -360,6 +360,14 @@ export interface ExtractedDecoratorRoute {
    */
   handlerFilePath?: string;
   /**
+   * Line the declaration of {@link handlerName} starts on, 1-based, in the
+   * file that declares it. Set when the extractor has singled that declaration
+   * out: a file may hold two classes with a method of that name, and the
+   * controller extends only one of them. Absent ⇒ the name resolves only when
+   * the file declares it once.
+   */
+  handlerLine?: number;
+  /**
    * Static hint for what the receiver of a qualified {@link handlerName}
    * (`h.Method`, `pkg.Func`) is, read from the registering file's own syntax.
    * The worker sees one file, so it records only what that file says:

@@ -531,6 +531,7 @@ function classFacts(
           : [
               {
                 handlerName: route.handlerName,
+                handlerLine: route.lineNumber,
                 httpMethod: route.httpMethod,
                 decoratorName: route.decoratorName,
                 routePath: route.routePath,

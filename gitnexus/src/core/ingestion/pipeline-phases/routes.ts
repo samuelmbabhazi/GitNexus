@@ -69,6 +69,13 @@ export interface RouteEntry {
    * from the graph instead of re-parsing the handler source.
    */
   method?: string;
+  /**
+   * File that declares the route's handler, when it is not `filePath`: a
+   * NestJS route inherited from a base class another file declares. The route,
+   * its file edge and its middleware stay with `filePath`; the response shape
+   * is read from the handler's own source.
+   */
+  handlerFilePath?: string;
 }
 
 export interface RoutesOutput {
@@ -376,6 +383,7 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
         // says so (`ExtractedDecoratorRoute.source`).
         source: dr.source ?? `decorator-${dr.decoratorName}`,
         method,
+        ...(dr.handlerFilePath === undefined ? {} : { handlerFilePath: dr.handlerFilePath }),
       });
     }
 
@@ -396,7 +404,11 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
       });
       handlerContents = await readFileContents(
         ctx.repoPath,
-        routes.map(({ handlerPath }) => handlerPath),
+        routes.flatMap(({ handlerPath, entry }) =>
+          entry.handlerFilePath === undefined
+            ? [handlerPath]
+            : [handlerPath, entry.handlerFilePath],
+        ),
       );
       const routeCountByPath = new Map<string, number>();
       for (const { handlerPath } of routes)
@@ -413,12 +425,26 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
 
         // A file-wide scan gives every route in a multi-route file the union of
         // its handlers' keys (#3488). Middleware stays file-level.
-        const shapeContent =
+        const ownShapeContent =
           content &&
           handlerSymbol?.node.properties.filePath === handlerPath &&
           (routeCountByPath.get(handlerPath) ?? 0) > 1
             ? (handlerSymbolContent(content, handlerSymbol.node) ?? analysisContent)
             : analysisContent;
+        // An inherited handler's body is in the file that declares it. The
+        // route's own file holds the responses of other handlers, or none, so
+        // without the method itself there is no shape to read.
+        const declaringContent =
+          entry.handlerFilePath === undefined
+            ? undefined
+            : handlerContents.get(entry.handlerFilePath);
+        const shapeContent =
+          entry.handlerFilePath === undefined
+            ? ownShapeContent
+            : declaringContent !== undefined &&
+                handlerSymbol?.node.properties.filePath === entry.handlerFilePath
+              ? handlerSymbolContent(declaringContent, handlerSymbol.node)
+              : undefined;
         const { responseKeys, errorKeys } = shapeContent
           ? handlerPath.endsWith('.php')
             ? extractPHPResponseShapes(shapeContent)

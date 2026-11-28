@@ -31,7 +31,9 @@ const CONTROLLER_FILE = 'src/venues/venues.controller.ts';
 const HEALTH_FILE = 'src/health/health.controller.ts';
 const INVOICES_FILE = 'src/invoices/invoices.controller.ts';
 const MEMBERS_FILE = 'src/members/members.controller.ts';
+const TAGS_FILE = 'src/tags/tags.controller.ts';
 const CRUD_FILE = 'src/shared/crud.controller.ts';
+const EXPORT_BASE_FILE = 'src/shared/export.base.js';
 
 interface RouteView {
   /** `${method} ${url}` — the `routeNodeKey` identity, as a sortable string. */
@@ -120,6 +122,13 @@ describe('NestJS decorator route ingestion pipeline', () => {
         handlerLabel: 'Method',
         handlerFile: CONTROLLER_FILE,
       },
+      // Inherited by a JavaScript controller from a JavaScript base class.
+      {
+        identity: 'GET /exports/pending',
+        handler: 'pending',
+        handlerLabel: 'Method',
+        handlerFile: EXPORT_BASE_FILE,
+      },
       {
         identity: 'GET /health',
         handler: 'health',
@@ -157,6 +166,25 @@ describe('NestJS decorator route ingestion pipeline', () => {
         handler: 'currentMember',
         handlerLabel: 'Method',
         handlerFile: MEMBERS_FILE,
+      },
+      // Inherited from `ReadOnlyController`, the second class of that file.
+      {
+        identity: 'GET /tags',
+        handler: 'findEvery',
+        handlerLabel: 'Method',
+        handlerFile: CRUD_FILE,
+      },
+      {
+        identity: 'GET /tags/popular',
+        handler: 'popular',
+        handlerLabel: 'Method',
+        handlerFile: TAGS_FILE,
+      },
+      {
+        identity: 'GET /tags/summary',
+        handler: 'summary',
+        handlerLabel: 'Method',
+        handlerFile: CRUD_FILE,
       },
       {
         identity: 'GET /venues',
@@ -231,6 +259,56 @@ describe('NestJS decorator route ingestion pipeline', () => {
         file: MEMBERS_FILE,
         handledBy: [`File ${MEMBERS_FILE}`, `Method ${CRUD_FILE}`],
       },
+    ]);
+  });
+
+  it('hands a route inherited across files to the method of the class it extends', () => {
+    // Each base file declares the handler name twice: `findEvery` on both
+    // classes of `crud.controller.ts`, `pending` on a class of `export.base.js`
+    // that no controller extends. The name finds two methods; the edge has to
+    // start at the one the controller's base class declares.
+    const handledBy = (url: string): string[] => {
+      const route = routeNodes().find((node) => node.properties.name === url);
+      return relationships()
+        .filter((rel) => rel.type === 'HANDLES_ROUTE' && rel.targetId === route?.id)
+        .map((rel) => result.graph.getNode(rel.sourceId))
+        .filter((source) => source?.label === 'Method')
+        .map((method) => {
+          const owners = relationships()
+            .filter((rel) => rel.type === 'HAS_METHOD' && rel.targetId === method?.id)
+            .map((rel) => String(result.graph.getNode(rel.sourceId)?.properties.name));
+          return `${owners.join('|')}.${String(method?.properties.name)}`;
+        });
+    };
+
+    expect({
+      members: handledBy('/members'),
+      tags: handledBy('/tags'),
+      exports: handledBy('/exports/pending'),
+    }).toEqual({
+      members: ['CrudController.findEvery'],
+      tags: ['ReadOnlyController.findEvery'],
+      exports: ['ExportBase.pending'],
+    });
+  });
+
+  it('reads the response shape of an inherited route from the base method', () => {
+    // `TagsController` answers `popular` in its own file and inherits
+    // `summary` and `findEvery`, whose bodies are in the base file. The route
+    // stays in the controller's file either way.
+    const tagRoutes = routeNodes()
+      .filter((node) => String(node.properties.name).startsWith('/tags'))
+      .map((node) => ({
+        route: String(node.properties.name),
+        file: String(node.properties.filePath).replaceAll('\\', '/'),
+        responseKeys: node.properties.responseKeys,
+      }))
+      .sort((a, b) => a.route.localeCompare(b.route));
+
+    expect(tagRoutes).toEqual([
+      { route: '/tags', file: TAGS_FILE, responseKeys: undefined },
+      { route: '/tags/popular', file: TAGS_FILE, responseKeys: ['tags', 'days'] },
+      { route: '/tags/summary', file: TAGS_FILE, responseKeys: ['items', 'total'] },
     ]);
   });
 
