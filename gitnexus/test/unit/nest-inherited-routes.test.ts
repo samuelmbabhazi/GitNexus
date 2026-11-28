@@ -700,6 +700,29 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
     expect(format(inherited(sources, () => ['base.ts', 'x.controller.ts']))).toEqual([]);
   });
 
+  it.each([
+    [
+      "class Hidden { @Get('hidden') hidden() {} }; export type { Hidden as Base };",
+      ['GET /x/ping'],
+    ],
+    [
+      "class Hidden { @Get('hidden') hidden() {} }; export { type Hidden as Base };",
+      ['GET /x/ping'],
+    ],
+    ["export type { Base } from './other';", ['GET /x/ping']],
+    ["export { type Base } from './other';", ['GET /x/ping']],
+  ] as const)('uses the runtime export over a star export for %s', (declaration, expected) => {
+    expect(
+      inheritedUrls({
+        'routed.ts':
+          "import { Get } from '@nestjs/common';\nexport class Base { @Get('ping') ping() {} }",
+        'other.ts': 'export interface Base {}',
+        'index.ts': `export * from './routed';\n${declaration}`,
+        'x.controller.ts': controller("import { Base } from './index';", 'Base'),
+      }),
+    ).toEqual(expected);
+  });
+
   it('inherits nothing when two star exports provide the name', () => {
     expect(
       inheritedUrls({

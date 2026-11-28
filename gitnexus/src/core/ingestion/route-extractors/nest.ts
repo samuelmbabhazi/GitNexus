@@ -52,6 +52,8 @@
 
 import type Parser from 'tree-sitter';
 import type { ParsedImport, Range } from 'gitnexus-shared';
+import { canonicalModuleExportName } from '../utils/ecmascript-literals.js';
+import { localExportSpecifiers } from '../ts-js-export-marker.js';
 import type { ExtractedDecoratorRoute } from '../workers/parse-worker.js';
 import { plainString, propertyName } from './data-route-table.js';
 import type {
@@ -457,6 +459,7 @@ export function extractNestInheritanceFacts(
   const reexports: NestInheritanceFacts['reexports'][number][] = [];
   const starExports: string[] = [];
   for (const parsed of parsedImports) {
+    if ('typeOnly' in parsed && parsed.typeOnly) continue;
     if (parsed.kind === 'reexport') {
       reexports.push({
         name: parsed.localName,
@@ -660,10 +663,9 @@ function exportedClassNames(root: Parser.SyntaxNode): Map<string, string[]> {
     }
     for (const clause of statement.namedChildren) {
       if (clause.type !== 'export_clause') continue;
-      for (const specifier of clause.namedChildren) {
-        if (specifier.type !== 'export_specifier') continue;
-        const name = specifier.childForFieldName('name');
-        add(name?.text, (specifier.childForFieldName('alias') ?? name)?.text);
+      for (const specifier of localExportSpecifiers(statement, clause)) {
+        const name = canonicalModuleExportName(specifier.publicName.text);
+        if (!specifier.typeOnly && name !== null) add(specifier.name, name);
       }
     }
   }
