@@ -405,9 +405,9 @@ describe('NestJS decorator route ingestion pipeline', () => {
 });
 
 describe('NestJS routes inherited from a base file written on one line', () => {
-  // Valid TypeScript that a formatter would spread over several lines, so the
-  // sources are written here and not kept as fixture files. On one line a
-  // method is told from its neighbours by its column only.
+  // The sources are written here and not kept as fixture files, so the shape
+  // under test sits next to its assertions. On one line a method is told from
+  // its neighbours by its column only.
   const SOURCES: Record<string, string> = {
     // Two classes on the line, both with a `ping`.
     'src/shared/pair.ts': [
