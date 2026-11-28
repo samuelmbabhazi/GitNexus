@@ -418,17 +418,14 @@ export const routesPhase: PipelinePhase<RoutesOutput> = {
         const handlerPath = typeof resolvedPath === 'string' ? resolvedPath : entry.filePath;
         return { routeKey, entry, handlerSymbol, handlerPath };
       });
-      handlerContents = await readFileContents(
-        ctx.repoPath,
-        routes.flatMap(({ handlerPath, entry }) =>
-          entry.handlerFilePath === undefined
-            ? [handlerPath]
-            : [handlerPath, entry.handlerFilePath],
-        ),
-      );
+      const handlerPaths = new Set<string>();
       const routeCountByPath = new Map<string, number>();
-      for (const { handlerPath } of routes)
+      for (const { handlerPath, entry } of routes) {
+        handlerPaths.add(handlerPath);
+        if (entry.handlerFilePath !== undefined) handlerPaths.add(entry.handlerFilePath);
         routeCountByPath.set(handlerPath, (routeCountByPath.get(handlerPath) ?? 0) + 1);
+      }
+      handlerContents = await readFileContents(ctx.repoPath, [...handlerPaths]);
 
       for (const { routeKey, entry, handlerSymbol, handlerPath } of routes) {
         const { source: routeSource, method: routeMethod, url } = entry;

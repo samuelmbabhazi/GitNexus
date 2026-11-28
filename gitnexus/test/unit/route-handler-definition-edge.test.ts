@@ -15,7 +15,7 @@
  *     edge only, no `handlerSymbolId` stamp, and no edge sourced on a node that
  *     does not exist.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -270,6 +270,26 @@ describe('routes phase — response shape of a route inherited from another file
     expect(handlesRouteSources(graph, routeId('summary')).sort()).toEqual(
       [generateId('File', TAGS), summaryId].sort(),
     );
+  });
+
+  it('reads each controller and declaring file once for multiple inherited routes', async () => {
+    const readFile = vi.spyOn(fs, 'readFile');
+    try {
+      const { repoPath } = await runRoutesPhase({
+        files,
+        routeHandlerSymbols: new Map(),
+        decoratorRoutes: [inherited('first', FIRST), inherited('second', SECOND)],
+      });
+      const paths = readFile.mock.calls.map(([file]) => file);
+      for (const file of [BASE, TAGS]) {
+        expect(
+          paths.filter((input) => input === path.join(repoPath, file)),
+          file,
+        ).toHaveLength(1);
+      }
+    } finally {
+      readFile.mockRestore();
+    }
   });
 
   it('gives each of two handlers on one line the keys of its own body', async () => {
