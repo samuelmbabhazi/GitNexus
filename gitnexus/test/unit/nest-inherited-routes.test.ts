@@ -701,6 +701,15 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
   });
 
   it.each([
+    ['export class Base {}', []],
+    ['export const Base = class {};', []],
+    ['export const { Base } = { Base: class {} };', []],
+    ['const { Hidden } = { Hidden: class {} }; export { Hidden as Base };', []],
+    ['const Hidden = class {}; export { Hidden as Base };', []],
+    ["export * as Base from './other';", []],
+    ['export interface Base {}', ['GET /x/ping']],
+    ['export declare const Base: unknown;', ['GET /x/ping']],
+    ['export enum Other { Base }', ['GET /x/ping']],
     [
       "class Hidden { @Get('hidden') hidden() {} }; export type { Hidden as Base };",
       ['GET /x/ping'],
@@ -972,6 +981,7 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
         ],
         reexports: [],
         starExports: ['./other'],
+        explicitValueExports: ['XController'],
       });
     });
 

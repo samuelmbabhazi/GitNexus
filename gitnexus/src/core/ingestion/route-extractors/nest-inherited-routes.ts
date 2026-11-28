@@ -87,6 +87,8 @@ export interface NestInheritanceFacts {
   }[];
   /** Sources of `export * from 'source'`. */
   readonly starExports: readonly string[];
+  /** Local runtime exports that take precedence over this file's star exports. */
+  readonly explicitValueExports?: readonly string[];
 }
 
 interface ResolvedClass {
@@ -107,8 +109,8 @@ export function resolveNestInheritedRoutes(
 
   /**
    * The class `filePath` exports under `name`. `undefined` when it exports
-   * none; `null` when two different classes could be the one, which makes the
-   * name unusable rather than a coin toss.
+   * none; `null` when the name is ambiguous or explicitly bound to an
+   * unrecognized value.
    */
   const exportedClass = (
     filePath: string,
@@ -133,6 +135,7 @@ export function resolveNestInheritedRoutes(
       return target === undefined ? undefined : exportedClass(target, named[0].imported, seen);
     }
 
+    if (facts.explicitValueExports?.includes(name)) return null;
     // `export *` forwards every name except `default`.
     if (name === 'default') return undefined;
     let found: ResolvedClass | undefined;

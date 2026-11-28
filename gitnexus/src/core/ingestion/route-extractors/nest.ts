@@ -54,6 +54,7 @@ import type Parser from 'tree-sitter';
 import type { ParsedImport, Range } from 'gitnexus-shared';
 import { canonicalModuleExportName } from '../utils/ecmascript-literals.js';
 import { localExportSpecifiers } from '../ts-js-export-marker.js';
+import { patternBindingNames } from './lexical-bindings.js';
 import type { ExtractedDecoratorRoute } from '../workers/parse-worker.js';
 import { plainString, propertyName } from './data-route-table.js';
 import type {
@@ -486,9 +487,60 @@ export function extractNestInheritanceFacts(
     }
   }
 
-  return classes.length + controllers.length + reexports.length + starExports.length === 0
-    ? undefined
-    : { classes, controllers, reexports, starExports };
+  if (classes.length + controllers.length + reexports.length + starExports.length === 0)
+    return undefined;
+
+  const explicitValueExports = starExports.length
+    ? barrelValueExports(tree.rootNode, parsedImports)
+    : [];
+  return {
+    classes,
+    controllers,
+    reexports,
+    starExports,
+    ...(explicitValueExports.length ? { explicitValueExports } : {}),
+  };
+}
+
+/** Value exports that a star export cannot replace, including aliases of local bindings. */
+function barrelValueExports(
+  root: Parser.SyntaxNode,
+  parsedImports: readonly ParsedImport[],
+): string[] {
+  const aliases = exportedClassNames(root);
+  const exported = new Set<string>();
+  for (const parsed of parsedImports) {
+    if (parsed.kind === 'namespace' && parsed.exportsOnly && !parsed.typeOnly)
+      exported.add(parsed.localName);
+  }
+  for (const statement of root.namedChildren) {
+    const isExport = statement.type === 'export_statement';
+    const declaration = isExport ? statement.childForFieldName('declaration') : statement;
+    if (!declaration) continue;
+    const names: Parser.SyntaxNode[] = [];
+    if (declaration.type === 'lexical_declaration' || declaration.type === 'variable_declaration') {
+      for (const binding of declaration.namedChildren) {
+        names.push(...patternBindingNames(binding.childForFieldName('name')));
+      }
+    } else if (
+      CLASS_DECLARATION_TYPES.has(declaration.type) ||
+      declaration.type === 'function_declaration' ||
+      declaration.type === 'generator_function_declaration' ||
+      declaration.type === 'enum_declaration' ||
+      declaration.type === 'internal_module'
+    ) {
+      const name = declaration.childForFieldName('name');
+      if (name) names.push(name);
+    }
+    const namedExport = isExport && !statement.children.some((child) => child.type === 'default');
+    for (const binding of names) {
+      const name = canonicalModuleExportName(binding.text);
+      if (name === null) continue;
+      if (namedExport) exported.add(name);
+      for (const alias of aliases.get(name) ?? []) exported.add(alias);
+    }
+  }
+  return [...exported];
 }
 
 /**
