@@ -778,11 +778,12 @@ function extendedClassName(classNode: Parser.SyntaxNode): string | null {
 }
 
 /**
- * The class of `export default class { … }`, when the file has one. Without a
- * name it is a `class` expression in the statement's `value` field, which only
- * `export default <expression>` has — a node type {@link CLASS_DECLARATION_TYPES}
- * leaves out, so {@link indexClassesByName} never meets it. `export default
- * class Base { … }` is a declaration and is indexed by name like any other.
+ * The class of `export default class { … }`, when the file has one. It is a
+ * class declaration without a name, and tree-sitter gives it the `class` node
+ * of a class expression, in the statement's `value` field — a node type
+ * {@link CLASS_DECLARATION_TYPES} leaves out, so {@link indexClassesByName}
+ * never meets it. `export default class Base { … }` is a `class_declaration`
+ * node and is indexed by name like any other.
  *
  * `export default abstract class { … }` stays out of reach: tree-sitter-typescript
  * has no rule for an abstract class without a name and yields an error node.
@@ -796,7 +797,7 @@ function anonymousDefaultClass(root: Parser.SyntaxNode): Parser.SyntaxNode | und
   return undefined;
 }
 
-/** Whether `node` is that class: a class expression, the value of an export statement. */
+/** Whether `node` is that class: a `class` node, the value of an export statement. */
 function isAnonymousDefaultClass(node: Parser.SyntaxNode): boolean {
   return (
     node.type === 'class' &&

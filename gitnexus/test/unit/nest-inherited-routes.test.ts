@@ -843,8 +843,8 @@ export class Alpha { @Get('ping') ping() {} } export class Beta { @Get('ping') p
     },
   ])('gives a controller without a name the routes of $label', ({ base, imports }) => {
     // `@Controller('x') export default class extends Base { … }` is a class
-    // expression. NestJS serves its own route and the inherited one, and not
-    // the handler it redeclares without a decorator.
+    // without a name. NestJS serves its own route and the inherited one, and
+    // not the handler it redeclares without a decorator.
     const withBase = (controller: string): Sources => ({
       'base.ts': `import { Get } from '@nestjs/common';\n${base}`,
       'x.controller.ts': `import { Controller, Get } from '@nestjs/common';\n${imports}\n${controller}`,

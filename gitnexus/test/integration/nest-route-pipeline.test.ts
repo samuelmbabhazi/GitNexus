@@ -329,8 +329,8 @@ describe('NestJS decorator route ingestion pipeline', () => {
 
   it('gives a controller written without a name its inherited routes and their handler edges', () => {
     // `@Controller('sessions') export default class extends CrudController`:
-    // a class expression. The routes belong to its file, and each inherited
-    // one has an edge from the `CrudController` method that answers.
+    // a class without a name. The routes belong to its file, and each
+    // inherited one has an edge from the `CrudController` method that answers.
     const sessions = routeNodes()
       .filter((node) => String(node.properties.name).startsWith('/sessions'))
       .map((node) => ({

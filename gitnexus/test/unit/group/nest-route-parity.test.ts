@@ -161,8 +161,8 @@ export class VenuesController {
   });
 
   it('pins a controller written without a name', () => {
-    // `export default class` is a class expression: the old group query and
-    // the indexer both looked at class declarations only.
+    // Without a name, `export default class` parses as a `class` node: the old
+    // group query and the indexer both looked at declaration nodes only.
     const src = `
 import { Controller, Get } from '@nestjs/common';
 

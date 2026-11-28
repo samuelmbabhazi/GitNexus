@@ -1047,9 +1047,10 @@ describe('NestJS decorator routes', () => {
 
   // ─── A controller written without a name ───────────────────────────
   //
-  // `export default class { … }` is a class expression, the value of the
-  // export statement, where a named class is a declaration. NestJS 12.5.0
-  // serves each form below as listed.
+  // `export default class { … }` is a class declaration without a name.
+  // tree-sitter gives it the `class` node of a class expression, as the value
+  // of the export statement, where a named class is a `class_declaration`.
+  // NestJS 12.5.0 serves each form below as listed.
 
   it.each([
     {
