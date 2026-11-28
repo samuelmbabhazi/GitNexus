@@ -227,6 +227,43 @@ describe('list --json (#1533)', () => {
     expect(logSpy).toHaveBeenCalledTimes(1);
     expect(JSON.parse(output())).toEqual({ schemaVersion: 1, repositories: [] });
   });
+
+  it('reports a registry it cannot read as an error, not as an empty list', async () => {
+    // The reader behind the listing swallows this failure and returns no row,
+    // which a script would take for every repository being gone.
+    const message = '/home/u/.gitnexus/registry.json is not valid JSON (registry is corrupt)';
+    vi.mocked(readRegistryStrict).mockRejectedValueOnce(new Error(message));
+    vi.mocked(listRegisteredRepos).mockResolvedValue([]);
+    const exitCode = process.exitCode;
+
+    try {
+      await listCommand({ json: true });
+
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(output())).toEqual({
+        schemaVersion: 1,
+        error: 'registry-unreadable',
+        message,
+      });
+      expect(process.exitCode).toBe(1);
+      expect(listRegisteredRepos).not.toHaveBeenCalled();
+    } finally {
+      process.exitCode = exitCode;
+      // A rejection the command did not consume would reach the next test.
+      vi.mocked(readRegistryStrict).mockReset();
+    }
+  });
+
+  it('leaves the plain listing on the reader it had', async () => {
+    vi.mocked(listRegisteredRepos).mockResolvedValue([]);
+    const exitCode = process.exitCode;
+
+    await listCommand();
+
+    expect(readRegistryStrict).not.toHaveBeenCalled();
+    expect(output()).toContain('No indexed repositories found.');
+    expect(process.exitCode).toBe(exitCode);
+  });
 });
 
 describe('status branch rendering (#2106)', () => {

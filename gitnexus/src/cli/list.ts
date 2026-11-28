@@ -4,7 +4,11 @@
  * Shows all indexed repositories from the global registry.
  */
 
-import { listRegisteredRepos, type RegistryEntry } from '../storage/repo-manager.js';
+import {
+  listRegisteredRepos,
+  readRegistryStrict,
+  type RegistryEntry,
+} from '../storage/repo-manager.js';
 import { t } from './i18n/index.js';
 
 export interface ListOptions {
@@ -32,6 +36,20 @@ const toJsonRow = (entry: RegistryEntry) => ({
 });
 
 export const listCommand = async (options: ListOptions = {}) => {
+  if (options.json) {
+    // A script acts on this list. A registry that cannot be read or parsed
+    // must not reach it as an empty one, or every repository would look
+    // removed. Only a registry file that is absent means nothing is indexed.
+    try {
+      await readRegistryStrict();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(JSON.stringify({ schemaVersion: 1, error: 'registry-unreadable', message }));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   const entries = await listRegisteredRepos({ validate: true });
 
   if (options.json) {
