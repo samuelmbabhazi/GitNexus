@@ -254,6 +254,82 @@ describe('list --json (#1533)', () => {
     }
   });
 
+  it('validates the rows of the strict read and reads the registry once', async () => {
+    // A second, lenient read could come back empty if the file broke in between.
+    const rows = [
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: '2026-06-11T08:00:00.000Z',
+        lastCommit: 'ccccccc3',
+      },
+    ];
+    vi.mocked(readRegistryStrict).mockResolvedValueOnce(rows);
+    vi.mocked(listRegisteredRepos).mockResolvedValue(rows);
+
+    try {
+      await listCommand({ json: true });
+
+      expect(listRegisteredRepos).toHaveBeenCalledTimes(1);
+      expect(listRegisteredRepos).toHaveBeenCalledWith({ validate: true, entries: rows });
+    } finally {
+      vi.mocked(readRegistryStrict).mockReset();
+    }
+  });
+
+  it.each([
+    { label: 'an object', branches: { length: 1 } },
+    { label: 'a string', branches: 'main' },
+    { label: 'a list with no branch row', branches: [null, 'main', { indexedAt: 'x' }] },
+  ])('leaves out `branches` when the registry holds $label there', async ({ branches }) => {
+    // The registry reader checks what identifies a repository, not this field.
+    vi.mocked(listRegisteredRepos).mockResolvedValue([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: '2026-06-11T08:00:00.000Z',
+        lastCommit: 'ccccccc3',
+        branches,
+      } as unknown as Awaited<ReturnType<typeof listRegisteredRepos>>[number],
+    ]);
+
+    await listCommand({ json: true });
+
+    expect(JSON.parse(output()).repositories).toEqual([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: '2026-06-11T08:00:00.000Z',
+        lastCommit: 'ccccccc3',
+      },
+    ]);
+  });
+
+  it('keeps the branch rows it can read next to one it cannot', async () => {
+    vi.mocked(listRegisteredRepos).mockResolvedValue([
+      {
+        name: 'solo',
+        path: '/solo',
+        storagePath: '/solo/.gitnexus',
+        indexedAt: '2026-06-11T08:00:00.000Z',
+        lastCommit: 'ccccccc3',
+        branches: [
+          null,
+          { branch: 'feature/x', indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: 'bbbbbbb2' },
+        ],
+      } as unknown as Awaited<ReturnType<typeof listRegisteredRepos>>[number],
+    ]);
+
+    await listCommand({ json: true });
+
+    expect(JSON.parse(output()).repositories[0].branches).toEqual([
+      { branch: 'feature/x', indexedAt: '2026-06-10T13:00:00.000Z', lastCommit: 'bbbbbbb2' },
+    ]);
+  });
+
   it('leaves the plain listing on the reader it had', async () => {
     vi.mocked(listRegisteredRepos).mockResolvedValue([]);
     const exitCode = process.exitCode;
@@ -261,6 +337,7 @@ describe('list --json (#1533)', () => {
     await listCommand();
 
     expect(readRegistryStrict).not.toHaveBeenCalled();
+    expect(listRegisteredRepos).toHaveBeenCalledWith({ validate: true });
     expect(output()).toContain('No indexed repositories found.');
     expect(process.exitCode).toBe(exitCode);
   });

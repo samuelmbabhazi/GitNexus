@@ -16,6 +16,23 @@ export interface ListOptions {
 }
 
 /**
+ * The branch rows of an entry, or nothing. The registry reader checks the
+ * fields that identify a repository and leaves `branches` as the file has it,
+ * so a value that is not a list, or a row in it that names no branch, is left
+ * out like an empty list.
+ */
+const toJsonBranches = (branches: unknown) => {
+  if (!Array.isArray(branches)) return undefined;
+  const rows = branches
+    .filter(
+      (row): row is NonNullable<RegistryEntry['branches']>[number] =>
+        typeof row === 'object' && row !== null && typeof row.branch === 'string',
+    )
+    .map(({ branch, indexedAt, lastCommit }) => ({ branch, indexedAt, lastCommit }));
+  return rows.length ? rows : undefined;
+};
+
+/**
  * One `list --json` row: the registry fields, under the names the MCP
  * `list_repos` tool gives them. It is not the whole `list_repos` row, which
  * also carries `staleness`, `siblings`, `contentRetention` and
@@ -30,18 +47,17 @@ const toJsonRow = (entry: RegistryEntry) => ({
   remoteUrl: entry.remoteUrl,
   stats: entry.stats,
   branch: entry.branch,
-  branches: entry.branches?.length
-    ? entry.branches.map(({ branch, indexedAt, lastCommit }) => ({ branch, indexedAt, lastCommit }))
-    : undefined,
+  branches: toJsonBranches(entry.branches),
 });
 
 export const listCommand = async (options: ListOptions = {}) => {
+  let strictRows: RegistryEntry[] | undefined;
   if (options.json) {
     // A script acts on this list. A registry that cannot be read or parsed
     // must not reach it as an empty one, or every repository would look
     // removed. Only a registry file that is absent means nothing is indexed.
     try {
-      await readRegistryStrict();
+      strictRows = await readRegistryStrict();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.log(JSON.stringify({ schemaVersion: 1, error: 'registry-unreadable', message }));
@@ -50,7 +66,13 @@ export const listCommand = async (options: ListOptions = {}) => {
     }
   }
 
-  const entries = await listRegisteredRepos({ validate: true });
+  // With `--json` the listing validates the rows of that strict read. Reading
+  // the file again, leniently, could turn a registry that broke in between
+  // into an empty list.
+  const entries = await listRegisteredRepos({
+    validate: true,
+    ...(strictRows ? { entries: strictRows } : {}),
+  });
 
   if (options.json) {
     // One line on stdout, so a script can parse it; no registry is an empty list.

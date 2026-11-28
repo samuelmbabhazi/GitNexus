@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { listCommand } from '../../src/cli/list.js';
+import { listRegisteredRepos } from '../../src/storage/repo-manager.js';
 
 describe('list --json and the registry file', () => {
   let home: string;
@@ -80,6 +81,22 @@ describe('list --json and the registry file', () => {
       ],
       exitCode: 1,
     });
+  });
+
+  it('lists the rows it is given without reading the registry again', async () => {
+    // The file breaks after the caller's strict read: a second, lenient read
+    // returns no row.
+    const row = {
+      name: 'demo',
+      path: '/demo',
+      storagePath: '/demo/.gitnexus',
+      indexedAt: '2026-06-10T12:00:00.000Z',
+      lastCommit: 'aaaaaaa1',
+    };
+    await fs.writeFile(registry(), '[{"name": "demo", "path": "/de');
+
+    expect(await listRegisteredRepos({ entries: [row] })).toEqual([row]);
+    expect(await listRegisteredRepos()).toEqual([]);
   });
 
   it('reports a registry path that is not a file', async () => {

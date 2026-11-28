@@ -1733,17 +1733,26 @@ export const findRegistryEntryByName = (
  * because of a transient filesystem error is kept in the returned view, so an
  * I/O storm cannot make the registry disappear; it remains unconfirmed until a
  * later validating read succeeds.
+ *
+ * `entries` are rows the caller has already read. A caller that must not take
+ * an unreadable registry for an empty one reads it with `readRegistryStrict`
+ * and passes the result, so the listing works on that read and not on a second,
+ * lenient one.
  */
 export function listRegisteredRepos(opts: {
   validate: true;
   discovery: DiscoveryMetadataCache;
 }): Promise<DiscoveredRegistryEntry[]>;
-export function listRegisteredRepos(opts?: { validate?: boolean }): Promise<RegistryEntry[]>;
+export function listRegisteredRepos(opts?: {
+  validate?: boolean;
+  entries?: readonly RegistryEntry[];
+}): Promise<RegistryEntry[]>;
 export async function listRegisteredRepos(opts?: {
   validate?: boolean;
   discovery?: DiscoveryMetadataCache;
+  entries?: readonly RegistryEntry[];
 }): Promise<DiscoveredRegistryEntry[]> {
-  const entries = await readRegistry();
+  const entries = opts?.entries ? [...opts.entries] : await readRegistry();
   if (!opts?.validate) return entries;
   const discovery = opts.discovery;
   discovery?.retainSlots(entries);
